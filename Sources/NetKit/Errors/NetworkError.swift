@@ -6,3 +6,14 @@
 //
 
 import Foundation
+
+public enum NetworkError: Error, Sendable {
+    case invalidURL
+    case noConnection
+    case timeout
+    case unauthorized
+    case httpError(statusCode: Int, data: Data)
+    case decoding(Error)
+    case cancelled
+    case unknown(Error)
+}
