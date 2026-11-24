@@ -13,55 +13,29 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
     private let decoder: JSONDecoder
     private let interceptors: [RequestInterceptor]
     private let retryPolicy: RetryPolicy?
+    private let monitor: NetworkMonitor?
+    private let onMetrics: (@Sendable (NetworkMetrics) -> Void)?
 
     public init(
         baseURL: URL,
         session: URLSession = .shared,
         decoder: JSONDecoder = JSONDecoder(),
         interceptors: [RequestInterceptor] = [],
-        retryPolicy: RetryPolicy? = nil
+        retryPolicy: RetryPolicy? = nil,
+        monitor: NetworkMonitor? = nil,
+        onMetrics: (@Sendable (NetworkMetrics) -> Void)? = nil
     ) {
         self.baseURL = baseURL
         self.session = session
         self.decoder = decoder
         self.interceptors = interceptors
         self.retryPolicy = retryPolicy
+        self.monitor = monitor
+        self.onMetrics = onMetrics
     }
 
-    private func perform<T: Decodable & Sendable>(
-        _ endpoint: Endpoint,
-        as type: T.Type
-    ) async throws -> T {
-        var request = try makeRequest(from: endpoint)
-        for interceptor in interceptors {
-            request = try await interceptor.adapt(request)
-        }
+    // MARK: - Public API
 
-        let data: Data
-        let response: URLResponse
-        do {
-            (data, response) = try await session.data(for: request)
-        } catch let error as URLError {
-            throw Self.map(error)
-        } catch {
-            throw NetworkError.unknown(error)
-        }
-
-        guard let http = response as? HTTPURLResponse else {
-            throw NetworkError.unknown(URLError(.badServerResponse))
-        }
-
-        guard (200..<300).contains(http.statusCode) else {
-            if http.statusCode == 401 { throw NetworkError.unauthorized }
-            throw NetworkError.httpError(statusCode: http.statusCode, data: data)
-        }
-
-        do {
-            return try decoder.decode(T.self, from: data)
-        } catch {
-            throw NetworkError.decoding(error)
-        }
-    }
     public func send<T: Decodable>(
         _ endpoint: Endpoint,
         as type: T.Type = T.self
@@ -79,7 +53,65 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
             }
         }
     }
+
+    // MARK: - Core
+
+    private func perform<T: Decodable>(
+        _ endpoint: Endpoint,
+        as type: T.Type
+    ) async throws -> T {
+        // Internet illa na request anuppaama udane fail
+        if let monitor, !monitor.isConnected {
+            throw NetworkError.noConnection
+        }
+
+        var request = try makeRequest(from: endpoint)
+        for interceptor in interceptors {
+            request = try await interceptor.adapt(request)
+        }
+
+        let start = ProcessInfo.processInfo.systemUptime
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch let error as URLError {
+            report(endpoint, status: nil, bytes: 0, since: start)
+            throw Self.map(error)
+        } catch {
+            report(endpoint, status: nil, bytes: 0, since: start)
+            throw NetworkError.unknown(error)
+        }
+
+        guard let http = response as? HTTPURLResponse else {
+            throw NetworkError.unknown(URLError(.badServerResponse))
+        }
+        report(endpoint, status: http.statusCode, bytes: data.count, since: start)
+
+        guard (200..<300).contains(http.statusCode) else {
+            if http.statusCode == 401 { throw NetworkError.unauthorized(data) }
+            throw NetworkError.httpError(statusCode: http.statusCode, data: data)
+        }
+
+        do {
+            return try decoder.decode(T.self, from: data)
+        } catch {
+            throw NetworkError.decoding(error)
+        }
+    }
+
     // MARK: - Helpers
+
+    private func report(_ endpoint: Endpoint, status: Int?, bytes: Int, since start: TimeInterval) {
+        guard let onMetrics else { return }
+        onMetrics(NetworkMetrics(
+            method: endpoint.method.rawValue,
+            path: endpoint.path,
+            statusCode: status,
+            duration: ProcessInfo.processInfo.systemUptime - start,
+            responseBytes: bytes
+        ))
+    }
 
     private func makeRequest(from endpoint: Endpoint) throws -> URLRequest {
         guard var components = URLComponents(

@@ -6,8 +6,9 @@
 //
 
 import Foundation
+
 public protocol NetworkClient: Sendable {
-    func send<T: Decodable & Sendable>(
+    func send<T: Decodable>(
         _ endpoint: Endpoint,
         as type: T.Type
     ) async throws -> T
