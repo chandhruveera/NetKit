@@ -65,11 +65,6 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
         _ endpoint: Endpoint,
         as type: T.Type
     ) async throws -> T {
-        // Internet illa na request anuppaama udane fail
-        if let monitor, !monitor.isConnected {
-            throw NetworkError.noConnection
-        }
-
         var request = try makeRequest(from: endpoint)
         for interceptor in interceptors {
             request = try await interceptor.adapt(request)
@@ -96,6 +91,11 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
         guard (200..<300).contains(http.statusCode) else {
             if http.statusCode == 401 { throw NetworkError.unauthorized(data) }
             throw NetworkError.httpError(statusCode: http.statusCode, data: data)
+        }
+
+        // Body illa (204, delete, logout) na EmptyResponse return pannalam
+        if data.isEmpty, let empty = EmptyResponse() as? T {
+            return empty
         }
 
         do {
