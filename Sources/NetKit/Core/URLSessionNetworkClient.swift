@@ -62,7 +62,7 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
             throw NetworkError.decoding(error)
         }
     }
-    public func send<T: Decodable & Sendable>(
+    public func send<T: Decodable>(
         _ endpoint: Endpoint,
         as type: T.Type = T.self
     ) async throws -> T {
