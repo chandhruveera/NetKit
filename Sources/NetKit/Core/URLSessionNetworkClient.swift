@@ -40,6 +40,11 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
         _ endpoint: Endpoint,
         as type: T.Type = T.self
     ) async throws -> T {
+        // Offline na retry pannaama udane fail
+        if let monitor, !monitor.isConnected {
+            throw NetworkError.noConnection
+        }
+
         var attempt = 0
         while true {
             do {
