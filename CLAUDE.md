@@ -27,14 +27,46 @@ Goal: reusable across apps from e-commerce to banking. Security must be configur
 - Tokens must never appear in logs, URLs, or error messages.
 
 ## Status
-- As of 2026-11-25: `swift build` passes and `swift test` passes (19/19).
-- Added NetworkClient+Convenience.swift (`call(_:method:parameter:token:headers:as:)`) and
-  NetworkError+Message.swift (`LocalizedError`: server message first, else a safe fixed text). Both approved.
+- As of 2026-11-25 (main @ 7475eaa, pushed): build clean, `swift test` 87/87 passing.
+- Done: security layers, `call` API, `LocalizedError`, network-free tests, optimization pass
+  (all async APIs throw only `NetworkError` via internal `NetworkError.wrap(_:)`; interceptor and
+  body-encoding errors surface as `.unknown(underlying)`), English doc comments on all public APIs.
+- Doc comments describe current behaviour incl. the open bugs below. Update docs in the same commit as a fix.
 - Known gaps vs Architecture above (not yet built, need API approval):
   - `Net` shared shortcut does not exist.
   - No separate NetworkError+Server.swift; `serverMessage`/`statusCode`/`decodeBody` live in NetworkError.swift.
   - BearerTokenInterceptor lives in RequestInterceptor.swift; ExponentialBackoffRetry lives in RetryPolicy.swift.
-- Tags released so far: 0.1.0, 0.1.2, 0.4.0 (do not touch tags).
+- Tags released so far: 0.1.0, 0.1.2, 0.4.0, 0.5.0 (0.5.0 = bfedfcc) (do not touch tags).
+
+## Open issues (from reviews, not fixed yet; most change defaults or public API -> ask first)
+Critical
+- Bearer token goes to any host: full URLs bypass baseURL, BearerTokenInterceptor ignores host,
+  `.standard` has `allowedHosts = nil`. Verified with a local server.
+- Pinning only applies to exact-host pin entries; `banking(allowedHosts: ["*.bank.com"], ...)` leaves
+  subdomains without pins unpinned. `banking()` doesn't check hosts vs pins.
+Important
+- NetworkMonitor reports offline right after start (NWPathMonitor starts `unsatisfied`), so fail-fast
+  can reject the first request. Not testable until the monitor can be injected.
+- Relative paths with `?` or `%` get percent-encoded (`items?page=2` -> `items%3Fpage=2`).
+- `call` sends Optional values as `Optional(2)` in query strings; arrays/dicts stringified.
+- `ExponentialBackoffRetry.maxAttempts` counts retries (3 -> up to 4 requests); delay > 60 s stops retrying.
+  Tests deliberately don't pin the exact count until this is decided.
+- Blocked query keys / redaction are exact-name: `accessToken`, `refreshToken`, `X-Auth-Token` etc. slip
+  through; a camelCase token in a query ends up in URLError userInfo (verified).
+- With `blockUnsafeRedirects = false`, custom headers (API key, attestation) follow cross-host redirects
+  and the allowlist isn't re-checked. (URLSession itself strips `Authorization` on redirects.)
+- Callback `request(...onSuccess:onFailure:)` can't be cancelled; closures not typed `@MainActor`
+  (only source of strict-concurrency warnings).
+- `SecureSession.make` mutates the caller's URLSessionConfiguration; shared JSONDecoder can be mutated
+  by the app under `decoderLock`, which also serializes all decoding.
+- `CertificatePinning` backup-pin check is `assert` only (DEBUG); nothing stops `.relaxed` in release.
+- `HTTPMethod`, `NetworkError`, `SecurityViolation` are public non-frozen enums: settle cases before 1.0.
+
+## Testing notes
+- Pinning tests use self-signed certs valid 200 days (Apple rejects TLS certs valid > 398 days) and
+  evaluate trust at a fixed date (2027-01-01), so they never expire. Regenerate certs + pins together.
+- MockURLProtocol.handler is a shared static: tests are not safe with `swift test --parallel`.
+  Use `Counter` from TestSupport.swift for counts mutated inside handlers.
 
 ## Commands
 - Build: `swift build`
