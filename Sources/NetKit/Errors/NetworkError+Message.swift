@@ -5,9 +5,11 @@
 
 import Foundation
 
-/// User-facing messages. Server message first, otherwise a fixed safe text.
-/// Never include URLs, headers or request bodies here (tokens must not leak).
+// Never include URLs, headers or request bodies here (tokens must not leak).
 extension NetworkError: LocalizedError {
+    /// A message safe to show to users: ``serverMessage`` when available,
+    /// otherwise a short fixed English text for the error case.
+    /// Never contains URLs, headers or request data.
     public var errorDescription: String? {
         if let serverMessage { return serverMessage }
         switch self {

@@ -7,23 +7,42 @@
 
 import Foundation
 
+/// Why a request was blocked by a ``SecurityPolicy`` rule. Carried by ``NetworkError/security(_:)``.
 public enum SecurityViolation: Error, Sendable {
+    /// The URL is not HTTPS and ``SecurityPolicy/requireHTTPS`` is on.
     case insecureConnection
+    /// The host (lowercased) is not in ``SecurityPolicy/allowedHosts``.
     case hostNotAllowed(String)
+    /// The URL query contains this key from ``SecurityPolicy/blockedQueryKeys``.
     case sensitiveQueryParameter(String)
+    /// ``SecurityPolicy/integrityCheck`` returned `false`.
     case integrityCheckFailed
+    /// TLS validation or certificate pinning failed for this host. Nothing was sent.
     case pinningFailed(String)
 }
 
+/// The only error type thrown by NetKit's async APIs.
+///
+/// Use ``serverMessage`` or `localizedDescription` to show a message to the user,
+/// ``statusCode`` to branch on HTTP status, and ``decodeBody(_:decoder:)`` for a custom error format.
 public enum NetworkError: Error, Sendable {
+    /// The URL could not be built (bad path, or relative path without a `baseURL`).
     case invalidURL
+    /// The device is offline (from ``NetworkMonitor`` or `URLError.notConnectedToInternet` / `.networkConnectionLost`).
     case noConnection
+    /// The request timed out.
     case timeout
+    /// HTTP 401. Holds the response body. Never retried.
     case unauthorized(Data)
+    /// Any other non-2xx HTTP status, with the response body.
     case httpError(statusCode: Int, data: Data)
+    /// A 2xx response body could not be decoded into the requested type.
     case decoding(Error)
+    /// The calling task was cancelled. Usually safe to ignore in UI.
     case cancelled
+    /// A ``SecurityPolicy`` rule blocked the request.
     case security(SecurityViolation)
+    /// Anything else: other `URLError`s, interceptor errors, request body encoding errors.
     case unknown(Error)
 }
 
@@ -51,7 +70,7 @@ extension NetworkError {
 
 public extension NetworkError {
 
-    /// HTTP status code (httpError / unauthorized ku mattum)
+    /// HTTP status code for ``httpError(statusCode:data:)`` and ``unauthorized(_:)`` (401); otherwise `nil`.
     var statusCode: Int? {
         switch self {
         case .httpError(let code, _): return code
@@ -60,7 +79,7 @@ public extension NetworkError {
         }
     }
 
-    /// Backend anuppina raw body
+    /// Raw response body for HTTP errors; otherwise `nil`.
     var responseData: Data? {
         switch self {
         case .httpError(_, let data): return data
@@ -69,13 +88,24 @@ public extension NetworkError {
         }
     }
 
-    /// Backend message (JSON la irundhu auto ah edukkum)
+    /// Human-readable message extracted from the error response body, if any.
+    ///
+    /// Looks for `message`, `error`, `error_description`, `detail`, `msg` and `errorMessage`
+    /// (in that order, also inside nested objects), then an `errors` array (joined with newlines),
+    /// then a top-level array of strings. Plain-text bodies under 200 characters are used as-is;
+    /// HTML is ignored.
     var serverMessage: String? {
         guard let data = responseData, !data.isEmpty else { return nil }
         return Self.extractMessage(from: data)
     }
 
-    /// Backend-oda own error format-ah decode panna
+    /// Decodes the error response body into your backend's own error type.
+    ///
+    /// ```swift
+    /// struct APIError: Decodable { let code: Int; let message: String }
+    /// if let apiError = error.decodeBody(APIError.self) { ... }
+    /// ```
+    /// - Returns: The decoded value, or `nil` if there is no body or it doesn't match `T`.
     func decodeBody<T: Decodable>(_ type: T.Type, decoder: JSONDecoder = JSONDecoder()) -> T? {
         guard let data = responseData else { return nil }
         return try? decoder.decode(type, from: data)
