@@ -39,7 +39,7 @@ Goal: reusable across apps from e-commerce to banking. Security must be configur
   - `Net` shared shortcut does not exist.
   - No separate NetworkError+Server.swift; `serverMessage`/`statusCode`/`decodeBody` live in NetworkError.swift.
   - BearerTokenInterceptor lives in RequestInterceptor.swift; ExponentialBackoffRetry lives in RetryPolicy.swift.
-- Tags released so far: 0.1.0, 0.1.2, 0.4.0, 0.5.0 (0.5.0 = bfedfcc) (do not touch tags).
+- Tags released so far: 0.1.0, 0.1.2, 0.4.0, 0.5.0 (bfedfcc), 0.6.0 (9233566) (do not touch tags).
 
 ## Open issues (from reviews, not fixed yet; most change defaults or public API -> ask first)
 Critical
