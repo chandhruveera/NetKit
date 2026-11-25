@@ -38,6 +38,9 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
     private let retryPolicy: RetryPolicy?
     private let monitor: NetworkMonitor?
     private let onMetrics: (@Sendable (NetworkMetrics) -> Void)?
+    /// Hosts that may receive credentials added by interceptors: allowedHosts, else baseURL's host.
+    /// nil = no trust information, credentials are not restricted.
+    private let credentialHosts: Set<String>?
 
     // MARK: - Init
 
@@ -46,6 +49,12 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
     /// - Parameters:
     ///   - baseURL: Base for relative ``Endpoint/path`` values. Without it only full URLs work.
     ///   - security: Transport and request security rules. Defaults to ``SecurityPolicy/standard``.
+    ///
+    /// **Credential scope:** sensitive headers (``Redactor/sensitiveHeaders``, e.g. `Authorization`,
+    /// `X-Api-Key`) added by interceptors are only sent to trusted hosts: those matching
+    /// ``SecurityPolicy/allowedHosts`` if set, otherwise exactly `baseURL`'s host. For any other host
+    /// they are reset to what the ``Endpoint`` set explicitly (e.g. via `call(token:)`), or removed.
+    /// With neither `allowedHosts` nor `baseURL`, credentials are not restricted.
     ///   - sessionConfiguration: Base configuration. Note: the policy's TLS, timeout and cache
     ///     settings are written into this object. Defaults to `.ephemeral` (no disk cache, no persistent cookies).
     ///   - decoder: Decoder for response bodies. Don't change its settings after passing it in.
@@ -73,6 +82,7 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
         self.retryPolicy = retryPolicy
         self.monitor = monitor
         self.onMetrics = onMetrics
+        self.credentialHosts = security.allowedHosts ?? baseURL?.host.map { [$0.lowercased()] }
     }
 
     deinit {
@@ -168,6 +178,9 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
         }
 
         // 3. Security layers (1, 2, 6, 9, 10, 11, 12)
+        // C1: interceptor credentials untrusted host ku poga koodadhu
+        request = scopeCredentials(request, explicit: baseRequest)
+
         request = try await security.apply(to: request)
 
         // 4. Network call
@@ -212,6 +225,23 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
         } catch {
             throw NetworkError.decoding(error)
         }
+    }
+
+    // MARK: - Credential scope
+
+    /// For hosts outside `credentialHosts`, resets every sensitive header to the value the caller
+    /// set explicitly on the Endpoint (or removes it), undoing what interceptors added.
+    private func scopeCredentials(_ request: URLRequest, explicit: URLRequest) -> URLRequest {
+        guard let credentialHosts,
+              let host = request.url?.host?.lowercased(),
+              !SecurityPolicy.matches(host, in: credentialHosts) else {
+            return request
+        }
+        var request = request
+        for name in Redactor.sensitiveHeaders {
+            request.setValue(explicit.value(forHTTPHeaderField: name), forHTTPHeaderField: name)
+        }
+        return request
     }
 
     // MARK: - Decoding

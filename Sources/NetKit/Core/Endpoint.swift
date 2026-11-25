@@ -18,6 +18,7 @@ public struct Endpoint: Sendable {
     ///
     /// Leading, trailing and repeated slashes in a relative path are ignored.
     /// A full URL bypasses `baseURL`; use ``SecurityPolicy/allowedHosts`` to restrict where requests can go.
+    /// Interceptor-added credentials are not sent to hosts other than `baseURL`'s unless allowed there.
     public let path: String
     /// HTTP method. Defaults to ``HTTPMethod/get``.
     public let method: HTTPMethod

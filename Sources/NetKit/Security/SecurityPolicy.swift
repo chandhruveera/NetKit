@@ -38,6 +38,8 @@ public struct SecurityPolicy: Sendable {
     public var requireHTTPS = true
     /// Hosts requests may go to, e.g. `["api.shop.com", "*.cdn.shop.com"]`.
     /// `*.` matches any subdomain but not the bare domain. `nil` (default) allows every host.
+    /// Also defines which hosts receive credentials added by interceptors; when `nil`,
+    /// only the client's `baseURL` host does.
     public var allowedHosts: Set<String>? = nil
     /// Minimum TLS version for the session. `nil` uses the system default. Default `.v12`.
     public var minimumTLS: TLSVersion? = .v12
@@ -191,7 +193,7 @@ public struct SecurityPolicy: Sendable {
         #endif
     }
 
-    private static func matches(_ host: String, in allowed: Set<String>) -> Bool {
+    static func matches(_ host: String, in allowed: Set<String>) -> Bool {
         for entry in allowed {
             let e = entry.lowercased()
             if e.hasPrefix("*.") {

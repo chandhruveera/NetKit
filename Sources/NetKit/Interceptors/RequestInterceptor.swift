@@ -24,8 +24,12 @@ public protocol RequestInterceptor: Sendable {
 /// The provider is called on every attempt, so a refreshed token is used on retries.
 /// Returning `nil` sends the request without the header.
 ///
-/// - Important: The header is added for **every** host, including full URLs passed as a path.
-///   Set ``SecurityPolicy/allowedHosts`` so the token can only go to your own servers.
+/// ``URLSessionNetworkClient`` removes this header again for requests to untrusted hosts
+/// (see ``URLSessionNetworkClient/init(baseURL:security:sessionConfiguration:decoder:interceptors:retryPolicy:monitor:onMetrics:)``),
+/// so the token only reaches your own servers.
+///
+/// - Important: A client with neither `baseURL` nor ``SecurityPolicy/allowedHosts`` has no way to
+///   tell which hosts are yours and sends the token everywhere. Set one of them.
 public struct BearerTokenInterceptor: RequestInterceptor {
     private let tokenProvider: @Sendable () async -> String?
 
