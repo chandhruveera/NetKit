@@ -117,6 +117,8 @@ enum SecureSession {
         policy: SecurityPolicy,
         configuration: URLSessionConfiguration
     ) -> (session: URLSession, delegate: SecurityDelegate) {
+        // Caller oda config-ah maathakoodadhu: copy la mattum policy settings
+        let configuration = configuration.copy() as! URLSessionConfiguration
 
         // 3. TLS minimum
         if let tls = policy.minimumTLS {

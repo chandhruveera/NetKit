@@ -57,8 +57,9 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
     /// ``SecurityPolicy/allowedHosts`` if set, otherwise exactly `baseURL`'s host. For any other host
     /// they are reset to what the ``Endpoint`` set explicitly (e.g. via `call(token:)`), or removed.
     /// With neither `allowedHosts` nor `baseURL`, credentials are not restricted.
-    ///   - sessionConfiguration: Base configuration. Note: the policy's TLS, timeout and cache
-    ///     settings are written into this object. Defaults to `.ephemeral` (no disk cache, no persistent cookies).
+    ///   - sessionConfiguration: Base configuration. The client works on a copy, adding the policy's TLS,
+    ///     timeout and cache settings; the object you pass is not modified. Defaults to `.ephemeral`
+    ///     (no disk cache, no persistent cookies).
     ///   - decoder: Decoder for response bodies. Don't change its settings after passing it in.
     ///   - interceptors: Run in order on every attempt, before the security checks.
     ///   - retryPolicy: Decides whether and when to retry. `nil` means no retries.
