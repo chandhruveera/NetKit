@@ -34,12 +34,13 @@ public struct SecurityPolicy: Sendable {
 
     // Transport (1-3)
 
-    /// Reject non-HTTPS URLs and HTTPS→HTTP redirects. `localhost`/`127.0.0.1` are allowed in DEBUG builds. Default `true`.
+    /// Reject non-HTTPS URLs and redirects to non-HTTPS URLs (also when ``blockUnsafeRedirects`` is off).
+    /// `localhost`/`127.0.0.1` are allowed in DEBUG builds. Default `true`.
     public var requireHTTPS = true
     /// Hosts requests may go to, e.g. `["api.shop.com", "*.cdn.shop.com"]`.
     /// `*.` matches any subdomain but not the bare domain. `nil` (default) allows every host.
     /// Also defines which hosts receive credentials added by interceptors; when `nil`,
-    /// only the client's `baseURL` host does.
+    /// only the client's `baseURL` host does. Redirect targets are checked against it too.
     public var allowedHosts: Set<String>? = nil
     /// Minimum TLS version for the session. `nil` uses the system default. Default `.v12`.
     public var minimumTLS: TLSVersion? = .v12
@@ -52,8 +53,14 @@ public struct SecurityPolicy: Sendable {
     /// fails with ``SecurityViolation/pinningFailed(_:)``. Without `allowedHosts`, hosts with no
     /// matching pin use normal system trust.
     public var pinning: CertificatePinning? = nil
-    /// Block redirects to a different host, and HTTPS→HTTP redirects when ``requireHTTPS`` is on.
-    /// A blocked redirect surfaces as ``NetworkError/httpError(statusCode:data:)`` with the 3xx status. Default `true`.
+    /// Block redirects to a different host. Default `true`.
+    ///
+    /// Always applied to redirects, whatever this setting: ``requireHTTPS`` and ``allowedHosts`` are
+    /// re-checked for the target, and when the origin (host, scheme or port) changes, sensitive headers
+    /// (``Redactor/sensitiveHeaders`` plus names like `X-Auth-Token` or `X-App-Attestation`) are removed
+    /// before the redirect is followed. Non-sensitive headers are kept.
+    ///
+    /// A blocked redirect surfaces as ``NetworkError/httpError(statusCode:data:)`` with the 3xx status.
     public var blockUnsafeRedirects = true
 
     // Session behavior (6, 9)
@@ -194,7 +201,7 @@ public struct SecurityPolicy: Sendable {
         return request
     }
 
-    private static func isLocalDebugHost(_ host: String) -> Bool {
+    static func isLocalDebugHost(_ host: String) -> Bool {
         #if DEBUG
         return host == "localhost" || host == "127.0.0.1"
         #else

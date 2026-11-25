@@ -27,7 +27,7 @@ Goal: reusable across apps from e-commerce to banking. Security must be configur
 - Tokens must never appear in logs, URLs, or error messages.
 
 ## Status
-- As of 2026-11-25 (pushed main @ 7475eaa): build clean, `swift test` 149/149 passing.
+- As of 2026-11-25 (pushed main @ 7475eaa): build clean, `swift test` 157/157 passing.
 - Done: security layers, `call` API, `LocalizedError`, network-free tests, optimization pass
   (all async APIs throw only `NetworkError` via internal `NetworkError.wrap(_:)`; interceptor and
   body-encoding errors surface as `.unknown(underlying)`), English doc comments on all public APIs.
@@ -58,6 +58,10 @@ Goal: reusable across apps from e-commerce to banking. Security must be configur
   (`CertificatePinning.minimumPinsPerHost`) fails closed with .pinningFailed, even if its pin matches.
   The DEBUG `assert` was replaced by a DEBUG warning print (so it is testable). Release-mode check:
   `swift test -c release -Xswiftc -enable-testing --filter PinningTests`.
+- Redirect hardening: requireHTTPS and allowedHosts are re-checked for every redirect target, even with
+  `blockUnsafeRedirects = false`. On an origin change (host, scheme or port; default ports normalized)
+  every `Redactor.isSensitiveHeader` header is removed; other headers kept. Verified live (localhost ->
+  127.0.0.1 redirect: X-Api-Key stripped, X-Request-Id kept).
 - Doc comments describe current behaviour incl. the open bugs below. Update docs in the same commit as a fix.
 - Known gaps vs Architecture above (not yet built, need API approval):
   - `Net` shared shortcut does not exist.
@@ -69,8 +73,6 @@ Goal: reusable across apps from e-commerce to banking. Security must be configur
 Critical
 - None open (C1, C3 fixed).
 Important
-- With `blockUnsafeRedirects = false`, custom headers (API key, attestation) follow cross-host redirects
-  and the allowlist isn't re-checked. (URLSession itself strips `Authorization` on redirects.)
 - Callback `request(...onSuccess:onFailure:)` can't be cancelled; closures not typed `@MainActor`
   (only source of strict-concurrency warnings).
 - `SecureSession.make` mutates the caller's URLSessionConfiguration; shared JSONDecoder can be mutated

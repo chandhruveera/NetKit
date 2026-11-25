@@ -86,13 +86,29 @@ final class SecurityDelegate: NSObject, URLSessionTaskDelegate, @unchecked Senda
         willPerformHTTPRedirection response: HTTPURLResponse,
         newRequest request: URLRequest
     ) async -> URLRequest? {
-        guard policy.blockUnsafeRedirects else { return request }
+        guard let target = request.url, let toHost = target.host?.lowercased() else { return nil }
 
-        let from = response.url?.host?.lowercased()
-        let to = request.url?.host?.lowercased()
-        if from != to { return nil }                                   // vera host ku redirect block
-        if policy.requireHTTPS, request.url?.scheme?.lowercased() != "https" { return nil }  // downgrade block
-        return request
+        // These apply even when blockUnsafeRedirects is off (#2)
+        if policy.requireHTTPS, target.scheme?.lowercased() != "https",
+           !SecurityPolicy.isLocalDebugHost(toHost) { return nil }                  // downgrade block
+        if let allowed = policy.allowedHosts, !SecurityPolicy.matches(toHost, in: allowed) { return nil }
+
+        if policy.blockUnsafeRedirects, response.url?.host?.lowercased() != toHost { return nil }  // vera host block
+
+        // Origin maarina (host, scheme or port) credentials anuppa koodadhu
+        guard let source = response.url, Self.origin(source) != Self.origin(target) else { return request }
+        var stripped = request
+        for name in (request.allHTTPHeaderFields ?? [:]).keys where Redactor.isSensitiveHeader(name) {
+            stripped.setValue(nil, forHTTPHeaderField: name)
+        }
+        return stripped
+    }
+
+    /// "scheme://host:port" with default ports filled in, lowercased.
+    static func origin(_ url: URL) -> String {
+        let scheme = url.scheme?.lowercased() ?? ""
+        let port = url.port ?? (scheme == "https" ? 443 : scheme == "http" ? 80 : -1)
+        return "\(scheme)://\(url.host?.lowercased() ?? ""):\(port)"
     }
 }
 
