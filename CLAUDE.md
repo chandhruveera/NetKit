@@ -27,7 +27,7 @@ Goal: reusable across apps from e-commerce to banking. Security must be configur
 - Tokens must never appear in logs, URLs, or error messages.
 
 ## Status
-- As of 2026-11-25 (pushed main @ 7475eaa): build clean, `swift test` 160/160 passing.
+- As of 2026-11-25 (pushed main @ 7475eaa): build clean, `swift test` 165/165 passing.
 - Done: security layers, `call` API, `LocalizedError`, network-free tests, optimization pass
   (all async APIs throw only `NetworkError` via internal `NetworkError.wrap(_:)`; interceptor and
   body-encoding errors surface as `.unknown(underlying)`), English doc comments on all public APIs.
@@ -64,6 +64,9 @@ Goal: reusable across apps from e-commerce to banking. Security must be configur
   127.0.0.1 redirect: X-Api-Key stripped, X-Request-Id kept).
 - SecureSession.make works on `configuration.copy()`; the caller's URLSessionConfiguration is never
   modified (protocolClasses etc. are kept in the copy). See SessionConfigurationTests.
+- Decoder: the client keeps its own copy (`URLSessionNetworkClient.privateCopy(of:)` copies all
+  JSONDecoder settings; subclasses are used as-is). No lock, so decodes run in parallel (TSan clean).
+  If JSONDecoder gains new settings, add them to privateCopy + DecoderTests.
 - Doc comments describe current behaviour incl. the open bugs below. Update docs in the same commit as a fix.
 - Known gaps vs Architecture above (not yet built, need API approval):
   - `Net` shared shortcut does not exist.
@@ -77,7 +80,6 @@ Critical
 Important
 - Callback `request(...onSuccess:onFailure:)` can't be cancelled; closures not typed `@MainActor`
   (only source of strict-concurrency warnings).
-- Shared JSONDecoder can be mutated by the app under `decoderLock`, which also serializes all decoding.
 - Nothing stops `.relaxed` from shipping in release builds.
 - `HTTPMethod`, `NetworkError`, `SecurityViolation` are public non-frozen enums: settle cases before 1.0.
 

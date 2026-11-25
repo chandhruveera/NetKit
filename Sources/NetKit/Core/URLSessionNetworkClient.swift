@@ -32,8 +32,8 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
     private let security: SecurityPolicy
     private let session: URLSession
     private let securityDelegate: SecurityDelegate
+    /// The client's own copy (see `privateCopy(of:)`); never mutated, so decoding needs no lock.
     private let decoder: JSONDecoder
-    private let decoderLock = NSLock()
     private let interceptors: [RequestInterceptor]
     private let retryPolicy: RetryPolicy?
     private let monitor: NetworkMonitor?
@@ -60,7 +60,9 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
     ///   - sessionConfiguration: Base configuration. The client works on a copy, adding the policy's TLS,
     ///     timeout and cache settings; the object you pass is not modified. Defaults to `.ephemeral`
     ///     (no disk cache, no persistent cookies).
-    ///   - decoder: Decoder for response bodies. Don't change its settings after passing it in.
+    ///   - decoder: Decoder for response bodies. Its settings are copied when the client is created, so
+    ///     later changes to it have no effect. A `JSONDecoder` subclass is used as-is and must be safe
+    ///     to call from several threads at once.
     ///   - interceptors: Run in order on every attempt, before the security checks.
     ///   - retryPolicy: Decides whether and when to retry. `nil` means no retries.
     ///   - monitor: When set, requests fail immediately with ``NetworkError/noConnection`` while offline.
@@ -80,7 +82,7 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
         self.security = security
         self.session = secured.session
         self.securityDelegate = secured.delegate
-        self.decoder = decoder
+        self.decoder = Self.privateCopy(of: decoder)
         self.interceptors = interceptors
         self.retryPolicy = retryPolicy
         self.monitor = monitor
@@ -252,9 +254,23 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
     // MARK: - Decoding
 
     private func decode<T: Decodable>(_ data: Data, as type: T.Type) throws -> T {
-        decoderLock.lock()
-        defer { decoderLock.unlock() }
-        return try decoder.decode(type, from: data)
+        try decoder.decode(type, from: data)
+    }
+
+    /// A new `JSONDecoder` with the same settings, so the app can't change it later and decoding can
+    /// run concurrently without a lock (decode doesn't mutate the decoder). Subclasses are returned
+    /// as-is, since copying would drop their overrides.
+    static func privateCopy(of decoder: JSONDecoder) -> JSONDecoder {
+        guard type(of: decoder) == JSONDecoder.self else { return decoder }
+        let copy = JSONDecoder()
+        copy.dateDecodingStrategy = decoder.dateDecodingStrategy
+        copy.dataDecodingStrategy = decoder.dataDecodingStrategy
+        copy.nonConformingFloatDecodingStrategy = decoder.nonConformingFloatDecodingStrategy
+        copy.keyDecodingStrategy = decoder.keyDecodingStrategy
+        copy.userInfo = decoder.userInfo
+        copy.allowsJSON5 = decoder.allowsJSON5
+        copy.assumesTopLevelDictionary = decoder.assumesTopLevelDictionary
+        return copy
     }
 
     // MARK: - Request builder (relative path + full URL rendum support)
