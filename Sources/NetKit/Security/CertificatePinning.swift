@@ -9,10 +9,24 @@ import Foundation
 import CryptoKit
 import Security
 
-/// host -> base64(SHA256(SPKI)) pins
+/// Public-key (SPKI) pins per host, used by ``SecurityPolicy/pinning``.
+///
+/// A connection to a pinned host succeeds only if normal TLS validation passes **and** at least
+/// one certificate in the chain has a matching pin; otherwise it fails closed with
+/// ``SecurityViolation/pinningFailed(_:)``. Supported keys: RSA 2048/4096, EC P-256/P-384.
+///
+/// Generate a pin with:
+/// ```
+/// openssl s_client -connect api.bank.com:443 -servername api.bank.com </dev/null \
+///   | openssl x509 -pubkey -noout | openssl pkey -pubin -outform der \
+///   | openssl dgst -sha256 -binary | base64
+/// ```
 public struct CertificatePinning: Sendable {
     private let pinsByHost: [String: Set<String>]
 
+    /// - Parameter pins: Exact host name (case-insensitive) → base64 SHA-256 SPKI hashes.
+    ///   Always include at least two per host (current + backup key) so a certificate
+    ///   rotation doesn't lock users out. Fewer than two triggers an assertion in DEBUG builds.
     public init(_ pins: [String: Set<String>]) {
         for (host, values) in pins {
             assert(values.count >= 2,

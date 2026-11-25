@@ -7,42 +7,92 @@
 
 import Foundation
 
+/// Security rules for a ``URLSessionNetworkClient``, chosen per app type.
+///
+/// Start from a preset and adjust individual properties:
+///
+/// | Preset | For | Adds |
+/// |---|---|---|
+/// | ``standard`` | e-commerce, social, content | HTTPS, TLS 1.2+, redirect + query-key protection |
+/// | ``strict(allowedHosts:)`` | fintech, wallet, health | host allowlist, no cache/cookies, 20 s timeout |
+/// | ``banking(allowedHosts:pinning:integrityCheck:attestation:)`` | banking, payments | pinning, 15 s timeout, device hooks |
+/// | ``relaxed`` | local dev / staging only | allows HTTP, no TLS minimum, no blocked keys |
+///
+/// ```swift
+/// var policy = SecurityPolicy.strict(allowedHosts: ["api.shop.com"])
+/// policy.idempotencyKeys = true
+/// ```
 public struct SecurityPolicy: Sendable {
 
-    public enum TLSVersion: Sendable { case v12, v13 }
+    /// Minimum TLS protocol version.
+    public enum TLSVersion: Sendable {
+        /// TLS 1.2
+        case v12
+        /// TLS 1.3
+        case v13
+    }
 
     // Transport (1-3)
+
+    /// Reject non-HTTPS URLs and HTTPS→HTTP redirects. `localhost`/`127.0.0.1` are allowed in DEBUG builds. Default `true`.
     public var requireHTTPS = true
-    public var allowedHosts: Set<String>? = nil        // ["api.shop.com", "*.cdn.shop.com"]
+    /// Hosts requests may go to, e.g. `["api.shop.com", "*.cdn.shop.com"]`.
+    /// `*.` matches any subdomain but not the bare domain. `nil` (default) allows every host.
+    public var allowedHosts: Set<String>? = nil
+    /// Minimum TLS version for the session. `nil` uses the system default. Default `.v12`.
     public var minimumTLS: TLSVersion? = .v12
 
     // Trust (4-5)
+
+    /// Certificate pins. Hosts without pins use normal system trust only. Default `nil`.
     public var pinning: CertificatePinning? = nil
+    /// Block redirects to a different host, and HTTPS→HTTP redirects when ``requireHTTPS`` is on.
+    /// A blocked redirect surfaces as ``NetworkError/httpError(statusCode:data:)`` with the 3xx status. Default `true`.
     public var blockUnsafeRedirects = true
 
-    // Session behavior (6, 9): disableCaching = cache + cookies off
+    // Session behavior (6, 9)
+
+    /// Turn off the URL cache and cookies for the session. Default `false`.
     public var disableCaching = false
+    /// Per-request timeout in seconds. Default 30.
     public var requestTimeout: TimeInterval = 30
 
     // Data hygiene (10)
+
+    /// Query keys that may never appear in a URL (matched case-insensitively, exact name).
+    /// Requests containing one fail with ``SecurityViolation/sensitiveQueryParameter(_:)``.
+    /// Default ``Redactor/sensitiveKeys``.
     public var blockedQueryKeys: Set<String> = Redactor.sensitiveKeys
 
-    // Safe retries (8): backend "Idempotency-Key" support pannina mattum true pannunga
+    // Safe retries (8)
+
+    /// Add a UUID `Idempotency-Key` header to POST/PATCH (kept across retries) and allow retrying them.
+    /// Only enable when your backend deduplicates on that header. Default `false`.
     public var idempotencyKeys = false
 
     // Hooks (11-12)
+
+    /// Called before every attempt; returning `false` blocks the request with
+    /// ``SecurityViolation/integrityCheckFailed`` (e.g. jailbreak/root detection). Default `nil`.
     public var integrityCheck: (@Sendable () async -> Bool)? = nil
+    /// Header name for the ``attestationProvider`` value. Default `"X-App-Attestation"`.
     public var attestationHeader = "X-App-Attestation"
+    /// Called before every attempt with the final request; a non-`nil` result is sent in
+    /// ``attestationHeader`` (e.g. an App Attest assertion). Default `nil`.
     public var attestationProvider: (@Sendable (URLRequest) async -> String?)? = nil
 
+    /// Creates a policy with the ``standard`` defaults.
     public init() {}
 
     // MARK: - Presets
 
-    /// E-commerce, social, content apps
+    /// Defaults for e-commerce, social and content apps: HTTPS only, TLS 1.2+,
+    /// unsafe redirects blocked, sensitive query keys blocked, any host allowed.
     public static var standard: SecurityPolicy { SecurityPolicy() }
 
-    /// Dev/staging mattum (release la use pannadheenga)
+    /// For local development and staging only: allows plain HTTP, no TLS minimum, no blocked query keys.
+    ///
+    /// - Warning: Do not ship this in release builds.
     public static var relaxed: SecurityPolicy {
         var p = SecurityPolicy()
         p.requireHTTPS = false
@@ -51,7 +101,9 @@ public struct SecurityPolicy: Sendable {
         return p
     }
 
-    /// Fintech, wallet, healthcare
+    /// For fintech, wallet and healthcare apps: ``standard`` plus a host allowlist,
+    /// no cache or cookies, and a 20 second timeout.
+    /// - Parameter allowedHosts: Hosts requests may go to (see ``allowedHosts``).
     public static func strict(allowedHosts: Set<String>) -> SecurityPolicy {
         var p = SecurityPolicy()
         p.allowedHosts = allowedHosts
@@ -60,7 +112,16 @@ public struct SecurityPolicy: Sendable {
         return p
     }
 
-    /// Banking, payments: pinning kandippa venum
+    /// For banking and payment apps: ``strict(allowedHosts:)`` plus certificate pinning,
+    /// a 15 second timeout and optional device integrity / attestation hooks.
+    ///
+    /// - Important: Only hosts with an entry in `pinning` are pinned. Every host matched by
+    ///   `allowedHosts` (including wildcard matches) should have pins.
+    /// - Parameters:
+    ///   - allowedHosts: Hosts requests may go to.
+    ///   - pinning: SPKI pins per host (current + backup).
+    ///   - integrityCheck: See ``integrityCheck``.
+    ///   - attestation: See ``attestationProvider``.
     public static func banking(
         allowedHosts: Set<String>,
         pinning: CertificatePinning,
