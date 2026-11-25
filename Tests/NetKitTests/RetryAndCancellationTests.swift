@@ -72,8 +72,27 @@ final class RetryAndCancellationTests: XCTestCase {
         let result = await send(makeMockClient(retryPolicy: fastRetry))
 
         guard case .failure(NetworkError.httpError(502, _)) = result else { return XCTFail("got \(result)") }
-        XCTAssertGreaterThan(calls.count, 1)
-        XCTAssertLessThanOrEqual(calls.count, 4)
+        XCTAssertEqual(calls.count, 3, "maxAttempts: 3 means 3 requests in total")
+    }
+
+    func test_maxAttempts_isTotalRequestCount() async {
+        for (maxAttempts, expected) in [(1, 1), (2, 2), (4, 4), (0, 1), (-5, 1)] {
+            let calls = Counter()
+            MockURLProtocol.handler = { request in calls.increment(); return (mockResponse(request, 503), Data()) }
+
+            _ = await send(makeMockClient(retryPolicy: ExponentialBackoffRetry(maxAttempts: maxAttempts, baseDelay: 0.001)))
+
+            XCTAssertEqual(calls.count, expected, "maxAttempts: \(maxAttempts)")
+        }
+    }
+
+    func test_backoffDelays_doublePerRetry() {
+        let policy = ExponentialBackoffRetry(maxAttempts: 4, baseDelay: 0.5)
+        let error = NetworkError.timeout
+        XCTAssertEqual(policy.delay(for: error, attempt: 1), 0.5)
+        XCTAssertEqual(policy.delay(for: error, attempt: 2), 1.0)
+        XCTAssertEqual(policy.delay(for: error, attempt: 3), 2.0)
+        XCTAssertNil(policy.delay(for: error, attempt: 4), "4 attempts = 3 retries")
     }
 
     func test_delayOver60Seconds_stopsRetrying() async {

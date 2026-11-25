@@ -25,23 +25,25 @@ public protocol RetryPolicy: Sendable {
 ///
 /// Never retries 4xx, 401, decoding, security or cancellation errors.
 public struct ExponentialBackoffRetry: RetryPolicy {
-    /// Maximum number of **retries** after the first attempt.
-    /// `maxAttempts: 3` sends the request up to 4 times.
+    /// Maximum number of requests in total, including the first one.
+    /// `maxAttempts: 3` sends the request at most 3 times (2 retries); `1` means no retries.
+    /// Values below 1 behave like 1.
     public let maxAttempts: Int
     /// Delay before the first retry, in seconds.
     public let baseDelay: TimeInterval
 
     /// - Parameters:
-    ///   - maxAttempts: Maximum retries after the first attempt. Defaults to 3.
+    ///   - maxAttempts: Maximum requests in total, including the first. Defaults to 3.
     ///   - baseDelay: Delay before the first retry, in seconds. Defaults to 0.5.
     public init(maxAttempts: Int = 3, baseDelay: TimeInterval = 0.5) {
         self.maxAttempts = maxAttempts
         self.baseDelay = baseDelay
     }
 
-    /// `baseDelay × 2^(attempt − 1)` for retryable errors while `attempt ≤ maxAttempts`, else `nil`.
+    /// `baseDelay × 2^(attempt − 1)` for retryable errors while `attempt < maxAttempts`, else `nil`.
     public func delay(for error: NetworkError, attempt: Int) -> TimeInterval? {
-        guard attempt <= maxAttempts else { return nil }
+        // attempt = retry number (1 = first retry); total requests = attempt + 1
+        guard attempt < maxAttempts else { return nil }
 
         switch error {
         case .timeout, .noConnection:
