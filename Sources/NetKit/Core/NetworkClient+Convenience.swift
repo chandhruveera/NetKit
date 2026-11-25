@@ -7,11 +7,28 @@ import Foundation
 
 public extension NetworkClient {
 
-    /// Old APIManager.makeApi style call.
-    /// - GET/DELETE: `parameter` goes into the URL query.
-    /// - POST/PUT/PATCH: `parameter` is sent as a JSON body.
-    /// - `token` is only ever sent as an `Authorization: Bearer` header, never in the URL.
-    /// `url` can be a full http(s) URL or a path relative to the client's baseURL.
+    /// One-line request in the style of the old `APIManager.makeApi`.
+    ///
+    /// - GET/DELETE: `parameter` becomes the URL query (keys sorted, values converted with `String(describing:)`).
+    /// - POST/PUT/PATCH: `parameter` is sent as a JSON body with `Content-Type: application/json`.
+    ///
+    /// ```swift
+    /// let user: User = try await client.call("https://api.shop.com/login",
+    ///                                        method: .post,
+    ///                                        parameter: ["email": email, "password": password])
+    /// let orders: [Order] = try await client.call("orders", parameter: ["page": 2], token: token)
+    /// ```
+    ///
+    /// - Parameters:
+    ///   - url: Relative path or full `http(s)://` URL (see ``Endpoint/path``).
+    ///   - method: HTTP method. Defaults to `.get`.
+    ///   - parameter: Query values (GET/DELETE) or JSON body (POST/PUT/PATCH). Must be JSON-serializable for bodies.
+    ///     Unwrap optionals first: an `Int?` is sent in a query as `"Optional(2)"`.
+    ///   - token: Sent only as `Authorization: Bearer <token>`, never in the URL.
+    ///     A ``BearerTokenInterceptor`` on the client runs later and overrides it.
+    ///   - headers: Extra request headers.
+    ///   - type: Response type to decode.
+    /// - Throws: Always a ``NetworkError``. A non-JSON-serializable body is ``NetworkError/unknown(_:)``.
     func call<T: Decodable>(
         _ url: String,
         method: HTTPMethod = .get,

@@ -8,6 +8,22 @@
 
 import Foundation
 
+/// The production ``NetworkClient``, built on `URLSession` and async/await.
+///
+/// Each request goes through: build URL → interceptors → ``SecurityPolicy`` checks →
+/// `URLSession` (TLS minimum, pinning, redirect rules) → status check → JSON decoding.
+/// Failures may be retried by a ``RetryPolicy``.
+///
+/// ```swift
+/// let client = URLSessionNetworkClient(
+///     baseURL: URL(string: "https://api.shop.com")!,
+///     security: .strict(allowedHosts: ["api.shop.com"]),
+///     interceptors: [BearerTokenInterceptor { await auth.token }],
+///     retryPolicy: ExponentialBackoffRetry()
+/// )
+/// ```
+///
+/// Create one client per backend and reuse it; each instance owns its own `URLSession`.
 public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
 
     // MARK: - Properties
@@ -25,6 +41,18 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
 
     // MARK: - Init
 
+    /// Creates a client.
+    ///
+    /// - Parameters:
+    ///   - baseURL: Base for relative ``Endpoint/path`` values. Without it only full URLs work.
+    ///   - security: Transport and request security rules. Defaults to ``SecurityPolicy/standard``.
+    ///   - sessionConfiguration: Base configuration. Note: the policy's TLS, timeout and cache
+    ///     settings are written into this object. Defaults to `.ephemeral` (no disk cache, no persistent cookies).
+    ///   - decoder: Decoder for response bodies. Don't change its settings after passing it in.
+    ///   - interceptors: Run in order on every attempt, before the security checks.
+    ///   - retryPolicy: Decides whether and when to retry. `nil` means no retries.
+    ///   - monitor: When set, requests fail immediately with ``NetworkError/noConnection`` while offline.
+    ///   - onMetrics: Called once per attempt with timing and size information, on a background thread.
     public init(
         baseURL: URL? = nil,
         security: SecurityPolicy = .standard,
@@ -53,6 +81,13 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
 
     // MARK: - Public API
 
+    /// Sends the endpoint, retrying according to the ``RetryPolicy``, and decodes the response.
+    ///
+    /// Never retried: ``NetworkError/cancelled``, ``NetworkError/unauthorized(_:)``, ``NetworkError/security(_:)``,
+    /// and POST/PATCH unless ``SecurityPolicy/idempotencyKeys`` is on.
+    /// Cancelling the calling task stops the request or the backoff wait and throws ``NetworkError/cancelled``.
+    ///
+    /// - Throws: Always a ``NetworkError``.
     public func send<T: Decodable>(
         _ endpoint: Endpoint,
         as type: T.Type = T.self
