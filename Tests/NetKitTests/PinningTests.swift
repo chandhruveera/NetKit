@@ -190,6 +190,43 @@ final class PinningTests: XCTestCase {
         XCTAssertEqual(result, .cancelAuthenticationChallenge)
     }
 
+    // MARK: - Backup pin required in every build (#1)
+
+    func test_singlePin_failsClosed_evenWhenItMatches() async {
+        let d = delegate(pins: ["pinned.test": [Self.rsaPin]])
+        let result = await decide(d)
+        XCTAssertEqual(result, .cancelAuthenticationChallenge, "no backup pin: rotation would lock users out")
+        XCTAssertTrue(d.takePinFailure(host: "pinned.test"))
+    }
+
+    func test_singleWildcardPin_failsClosed() async {
+        let d = delegate(pins: ["*.test": [Self.rsaPin]])
+        let result = await decide(d)
+        XCTAssertEqual(result, .cancelAuthenticationChallenge)
+    }
+
+    func test_emptyPinStrings_doNotCountAsBackup() async {
+        let d = delegate(pins: ["pinned.test": [Self.rsaPin, "", "  "]])
+        let result = await decide(d)
+        XCTAssertEqual(result, .cancelAuthenticationChallenge)
+    }
+
+    func test_emptyPinSet_failsClosed() async {
+        let d = delegate(pins: ["pinned.test": []])
+        let result = await decide(d)
+        XCTAssertEqual(result, .cancelAuthenticationChallenge)
+    }
+
+    func test_singlePinHost_doesNotAffectOtherHosts() async {
+        let d = delegate(pins: ["other.test": ["only-one"], "pinned.test": [Self.rsaPin, "backup"]])
+        let result = await decide(d)
+        XCTAssertEqual(result, .useCredential)
+    }
+
+    func test_minimumPinsPerHost_isTwo() {
+        XCTAssertEqual(CertificatePinning.minimumPinsPerHost, 2)
+    }
+
     // MARK: - Fail closed for unpinned hosts when allowedHosts is set (C3)
 
     func test_unpinnedHost_withAllowedHosts_failsClosed() async {

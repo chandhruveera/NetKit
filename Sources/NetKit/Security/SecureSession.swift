@@ -49,6 +49,15 @@ final class SecurityDelegate: NSObject, URLSessionTaskDelegate, @unchecked Senda
             return (.performDefaultHandling, nil)       // allowedHosts illa: per-host opt-in
         }
 
+        // #1: backup pin illa na fail closed (every build), even if the single pin matches
+        guard expected.count >= CertificatePinning.minimumPinsPerHost else {
+            #if DEBUG
+            print("[NetKit] \(host): fewer than \(CertificatePinning.minimumPinsPerHost) pins configured (need current + backup).")
+            #endif
+            recordPinFailure(host)
+            return (.cancelAuthenticationChallenge, nil)
+        }
+
         // Mudhal la normal trust validation
         var error: CFError?
         guard SecTrustEvaluateWithError(trust, &error) else {

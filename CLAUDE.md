@@ -27,7 +27,7 @@ Goal: reusable across apps from e-commerce to banking. Security must be configur
 - Tokens must never appear in logs, URLs, or error messages.
 
 ## Status
-- As of 2026-11-25 (pushed main @ 7475eaa): build clean, `swift test` 143/143 passing.
+- As of 2026-11-25 (pushed main @ 7475eaa): build clean, `swift test` 149/149 passing.
 - Done: security layers, `call` API, `LocalizedError`, network-free tests, optimization pass
   (all async APIs throw only `NetworkError` via internal `NetworkError.wrap(_:)`; interceptor and
   body-encoding errors surface as `.unknown(underlying)`), English doc comments on all public APIs.
@@ -54,6 +54,10 @@ Goal: reusable across apps from e-commerce to banking. Security must be configur
 - I4 fixed: `ExponentialBackoffRetry.maxAttempts` = total requests incl. the first (3 -> max 3 requests,
   <1 behaves like 1). RetryPolicy delays > 60 s are capped to 60 s and still retry (internal
   `maxRetryDelay`, lowered in tests); non-finite / <= 0 delays stop retrying.
+- Backup pin enforced in every build: a host with < 2 distinct non-empty pins
+  (`CertificatePinning.minimumPinsPerHost`) fails closed with .pinningFailed, even if its pin matches.
+  The DEBUG `assert` was replaced by a DEBUG warning print (so it is testable). Release-mode check:
+  `swift test -c release -Xswiftc -enable-testing --filter PinningTests`.
 - Doc comments describe current behaviour incl. the open bugs below. Update docs in the same commit as a fix.
 - Known gaps vs Architecture above (not yet built, need API approval):
   - `Net` shared shortcut does not exist.
@@ -71,7 +75,7 @@ Important
   (only source of strict-concurrency warnings).
 - `SecureSession.make` mutates the caller's URLSessionConfiguration; shared JSONDecoder can be mutated
   by the app under `decoderLock`, which also serializes all decoding.
-- `CertificatePinning` backup-pin check is `assert` only (DEBUG); nothing stops `.relaxed` in release.
+- Nothing stops `.relaxed` from shipping in release builds.
 - `HTTPMethod`, `NetworkError`, `SecurityViolation` are public non-frozen enums: settle cases before 1.0.
 
 ## Testing notes

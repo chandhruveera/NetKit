@@ -18,6 +18,11 @@ import Security
 /// Host keys may be exact (`"api.bank.com"`) or wildcards (`"*.bank.com"`, any subdomain but not
 /// `bank.com` itself). An exact key wins over wildcards; among wildcards the most specific wins.
 ///
+/// **Backup pin required:** a host needs at least ``minimumPinsPerHost`` (2) distinct, non-empty pins
+/// (current key + backup key). A host with fewer fails closed with ``SecurityViolation/pinningFailed(_:)``
+/// in every build, even if its one pin matches, so a missing backup is found in development instead
+/// of locking users out after a certificate rotation. Other hosts are not affected.
+///
 /// Hosts with no matching key: when ``SecurityPolicy/allowedHosts`` is set (e.g. ``SecurityPolicy/banking(allowedHosts:pinning:integrityCheck:attestation:)``)
 /// the connection is rejected (fail closed). Without `allowedHosts`, such hosts use normal system trust.
 ///
@@ -30,18 +35,28 @@ import Security
 public struct CertificatePinning: Sendable {
     private let pinsByHost: [String: Set<String>]
 
+    /// Minimum distinct, non-empty pins per host (current key + backup key).
+    static let minimumPinsPerHost = 2
+
     /// - Parameter pins: Host name or `*.` wildcard (case-insensitive) → base64 SHA-256 SPKI hashes.
-    ///   Always include at least two per host (current + backup key) so a certificate
-    ///   rotation doesn't lock users out. Fewer than two triggers an assertion in DEBUG builds.
+    ///   Include at least two per host (current + backup key). Hosts with fewer fail closed
+    ///   (see the type documentation); DEBUG builds also print a warning here.
     public init(_ pins: [String: Set<String>]) {
-        for (host, values) in pins {
-            assert(values.count >= 2,
-                   "\(host): current + backup pin rendum podunga. Illa na certificate rotate aana users lock aagiduvanga")
+        self.pinsByHost = pins.reduce(into: [:]) { result, entry in
+            result[entry.key.lowercased()] = Set(
+                entry.value.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+            )
         }
-        self.pinsByHost = pins.reduce(into: [:]) { $0[$1.key.lowercased()] = $1.value }
+        #if DEBUG
+        for (host, values) in pinsByHost where values.count < Self.minimumPinsPerHost {
+            print("[NetKit] Pinning for \(host) has \(values.count) pin(s); at least \(Self.minimumPinsPerHost) "
+                  + "(current + backup) are required. Connections to it will fail.")
+        }
+        #endif
     }
 
     /// Exact host key first, then the most specific matching `*.` wildcard key.
+    /// Values are trimmed and empty strings removed.
     func pins(for host: String) -> Set<String>? {
         let host = host.lowercased()
         if let exact = pinsByHost[host] { return exact }
