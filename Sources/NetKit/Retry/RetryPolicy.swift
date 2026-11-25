@@ -16,7 +16,7 @@ public protocol RetryPolicy: Sendable {
     /// - Parameters:
     ///   - error: The error from the attempt that just failed.
     ///   - attempt: 1 for the first retry, 2 for the second, and so on.
-    /// - Returns: Seconds to wait. Values that are not finite, ≤ 0 or > 60 stop retrying.
+    /// - Returns: Seconds to wait. Values over 60 are capped to 60; values that are not finite or ≤ 0 stop retrying.
     func delay(for error: NetworkError, attempt: Int) -> TimeInterval?
 }
 

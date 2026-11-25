@@ -95,17 +95,40 @@ final class RetryAndCancellationTests: XCTestCase {
         XCTAssertNil(policy.delay(for: error, attempt: 4), "4 attempts = 3 retries")
     }
 
-    func test_delayOver60Seconds_stopsRetrying() async {
-        struct HugeDelay: RetryPolicy {
-            func delay(for error: NetworkError, attempt: Int) -> TimeInterval? { 120 }
+    func test_delayOverCap_isCapped_andStillRetries() async {
+        struct LongDelayOnce: RetryPolicy {
+            func delay(for error: NetworkError, attempt: Int) -> TimeInterval? { attempt == 1 ? 120 : nil }
         }
         let calls = Counter()
         MockURLProtocol.handler = { request in calls.increment(); return (mockResponse(request, 500), Data()) }
+        let client = makeMockClient(retryPolicy: LongDelayOnce())
+        client.maxRetryDelay = 0.01   // production cap is 60 s
 
-        let result = await send(makeMockClient(retryPolicy: HugeDelay()))
+        let start = Date()
+        let result = await send(client)
 
         guard case .failure(NetworkError.httpError(500, _)) = result else { return XCTFail("got \(result)") }
-        XCTAssertEqual(calls.count, 1)
+        XCTAssertEqual(calls.count, 2, "retried once after the capped wait")
+        XCTAssertLessThan(Date().timeIntervalSince(start), 2)
+    }
+
+    func test_invalidDelays_stopRetrying() async {
+        struct FixedDelay: RetryPolicy {
+            let value: TimeInterval
+            func delay(for error: NetworkError, attempt: Int) -> TimeInterval? { value }
+        }
+        for value in [0, -1, .infinity, .nan] as [TimeInterval] {
+            let calls = Counter()
+            MockURLProtocol.handler = { request in calls.increment(); return (mockResponse(request, 500), Data()) }
+
+            _ = await send(makeMockClient(retryPolicy: FixedDelay(value: value)))
+
+            XCTAssertEqual(calls.count, 1, "delay \(value)")
+        }
+    }
+
+    func test_defaultRetryDelayCap_is60Seconds() {
+        XCTAssertEqual(makeMockClient().maxRetryDelay, 60)
     }
 
     func test_put_isRetried() async throws {

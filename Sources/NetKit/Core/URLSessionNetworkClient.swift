@@ -41,6 +41,8 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
     /// Hosts that may receive credentials added by interceptors: allowedHosts, else baseURL's host.
     /// nil = no trust information, credentials are not restricted.
     private let credentialHosts: Set<String>?
+    /// Longest wait between retries; longer RetryPolicy delays are capped to this. Internal so tests can lower it.
+    var maxRetryDelay: TimeInterval = 60
 
     // MARK: - Init
 
@@ -144,10 +146,11 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
 
                 attempt += 1
 
-                guard let delay = retryPolicy?.delay(for: error, attempt: attempt),
-                      delay.isFinite, delay > 0, delay <= 60 else {
+                guard let requested = retryPolicy?.delay(for: error, attempt: attempt),
+                      requested.isFinite, requested > 0 else {
                     throw error
                 }
+                let delay = min(requested, maxRetryDelay)   // 60s mela wait panna vendam, but retry pannum
 
                 do {
                     try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))

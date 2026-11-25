@@ -27,7 +27,7 @@ Goal: reusable across apps from e-commerce to banking. Security must be configur
 - Tokens must never appear in logs, URLs, or error messages.
 
 ## Status
-- As of 2026-11-25 (pushed main @ 7475eaa): build clean, `swift test` 139/139 passing.
+- As of 2026-11-25 (pushed main @ 7475eaa): build clean, `swift test` 143/143 passing.
 - Done: security layers, `call` API, `LocalizedError`, network-free tests, optimization pass
   (all async APIs throw only `NetworkError` via internal `NetworkError.wrap(_:)`; interceptor and
   body-encoding errors surface as `.unknown(underlying)`), English doc comments on all public APIs.
@@ -51,6 +51,9 @@ Goal: reusable across apps from e-commerce to banking. Security must be configur
   fragment like password/token/secret/apikey/auth/session). Query blocking: normalized EXACT match
   (accessToken blocked, pageToken/next_token allowed). Credential scope + log headers use
   `Redactor.isSensitiveHeader` (X-Auth-Token etc.).
+- I4 fixed: `ExponentialBackoffRetry.maxAttempts` = total requests incl. the first (3 -> max 3 requests,
+  <1 behaves like 1). RetryPolicy delays > 60 s are capped to 60 s and still retry (internal
+  `maxRetryDelay`, lowered in tests); non-finite / <= 0 delays stop retrying.
 - Doc comments describe current behaviour incl. the open bugs below. Update docs in the same commit as a fix.
 - Known gaps vs Architecture above (not yet built, need API approval):
   - `Net` shared shortcut does not exist.
@@ -62,8 +65,6 @@ Goal: reusable across apps from e-commerce to banking. Security must be configur
 Critical
 - None open (C1, C3 fixed).
 Important
-- `ExponentialBackoffRetry.maxAttempts` counts retries (3 -> up to 4 requests); delay > 60 s stops retrying.
-  Tests deliberately don't pin the exact count until this is decided.
 - With `blockUnsafeRedirects = false`, custom headers (API key, attestation) follow cross-host redirects
   and the allowlist isn't re-checked. (URLSession itself strips `Authorization` on redirects.)
 - Callback `request(...onSuccess:onFailure:)` can't be cancelled; closures not typed `@MainActor`
