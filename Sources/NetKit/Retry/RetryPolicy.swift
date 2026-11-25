@@ -26,11 +26,12 @@ public struct ExponentialBackoffRetry: RetryPolicy {
 
         switch error {
         case .timeout, .noConnection:
-            return baseDelay * pow(2, Double(attempt - 1))
+            break
         case .httpError(let code, _) where (500...599).contains(code):
-            return baseDelay * pow(2, Double(attempt - 1))
+            break
         default:
             return nil   // 4xx, decoding, unauthorized ku retry pannakoodadhu
         }
+        return baseDelay * pow(2, Double(attempt - 1))
     }
 }

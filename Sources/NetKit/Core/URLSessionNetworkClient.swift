@@ -198,7 +198,8 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
         let rawPath = endpoint.path
         let url: URL
 
-        if rawPath.lowercased().hasPrefix("https://") || rawPath.lowercased().hasPrefix("http://") {
+        let lowered = rawPath.lowercased()
+        if lowered.hasPrefix("https://") || lowered.hasPrefix("http://") {
             guard let absolute = URL(string: rawPath) else { throw NetworkError.invalidURL }
             url = absolute
         } else {
