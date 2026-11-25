@@ -256,7 +256,8 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
 
     private func makeRequest(from endpoint: Endpoint) throws -> URLRequest {
         let rawPath = endpoint.path
-        let url: URL
+        var url: URL
+        var query: [String] = []
 
         let lowered = rawPath.lowercased()
         if lowered.hasPrefix("https://") || lowered.hasPrefix("http://") {
@@ -264,28 +265,70 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
             url = absolute
         } else {
             guard let baseURL else { throw NetworkError.invalidURL }
-            // Empty segments drop aagum: "/v1//items/" -> "v1/items". Ore oru URL allocation.
-            let path = rawPath.split(separator: "/").joined(separator: "/")
-            url = path.isEmpty ? baseURL : baseURL.appendingPathComponent(path)
-        }
-
-        var finalURL = url
-        if !endpoint.queryItems.isEmpty {
-            guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
-                throw NetworkError.invalidURL
+            // "items?page=2" -> path "items" + query "page=2" (I2)
+            let parts = rawPath.split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false)
+            // Empty segments drop aagum: "/v1//items/" -> "v1/items"
+            let path = parts[0].split(separator: "/").joined(separator: "/")
+            url = baseURL
+            if !path.isEmpty {
+                guard var c = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
+                    throw NetworkError.invalidURL
+                }
+                let basePath = c.percentEncodedPath.hasSuffix("/") ? String(c.percentEncodedPath.dropLast()) : c.percentEncodedPath
+                c.percentEncodedPath = basePath + "/" + Self.percentEncode(path, allowed: .urlPathAllowed)
+                guard let joined = c.url else { throw NetworkError.invalidURL }
+                url = joined
             }
-            components.queryItems = (components.queryItems ?? []) + endpoint.queryItems
-            guard let merged = components.url else { throw NetworkError.invalidURL }
-            finalURL = merged
+            if parts.count == 2, !parts[1].isEmpty {
+                query.append(Self.percentEncode(String(parts[1]), allowed: .urlQueryAllowed))
+            }
         }
 
-        var request = URLRequest(url: finalURL)
+        if !endpoint.queryItems.isEmpty {
+            query.append(endpoint.queryItems.map(Self.encodeQueryItem).joined(separator: "&"))
+        }
+
+        if !query.isEmpty {
+            guard var c = URLComponents(url: url, resolvingAgainstBaseURL: false) else { throw NetworkError.invalidURL }
+            // Existing query (full URL / baseURL) apdiye irukkum; pudhusa append mattum
+            let existing = c.percentEncodedQuery.flatMap { $0.isEmpty ? nil : $0 }
+            c.percentEncodedQuery = ([existing].compactMap { $0 } + query).joined(separator: "&")
+            guard let merged = c.url else { throw NetworkError.invalidURL }
+            url = merged
+        }
+
+        var request = URLRequest(url: url)
         request.httpMethod = endpoint.method.rawValue
         request.httpBody = endpoint.body
         for (key, value) in endpoint.headers {
             request.setValue(value, forHTTPHeaderField: key)
         }
         return request
+    }
+
+    /// Percent-encodes characters outside `allowed`, keeping existing valid `%XX` escapes
+    /// (so pre-encoded paths aren't double-encoded) and encoding a lone `%` as `%25`.
+    static func percentEncode(_ string: String, allowed: CharacterSet) -> String {
+        var text = string
+        if text.contains("%") {
+            text = text.replacingOccurrences(of: "%(?![0-9A-Fa-f]{2})", with: "%25", options: .regularExpression)
+        }
+        var allowedWithPercent = allowed
+        allowedWithPercent.insert("%")
+        return text.addingPercentEncoding(withAllowedCharacters: allowedWithPercent) ?? text
+    }
+
+    /// Characters left as-is in a query item name or value (same set URLComponents uses).
+    private static let queryItemAllowed: CharacterSet = {
+        var set = CharacterSet.urlQueryAllowed
+        set.remove(charactersIn: "&=")
+        return set
+    }()
+
+    private static func encodeQueryItem(_ item: URLQueryItem) -> String {
+        let name = item.name.addingPercentEncoding(withAllowedCharacters: queryItemAllowed) ?? item.name
+        guard let value = item.value else { return name }
+        return name + "=" + (value.addingPercentEncoding(withAllowedCharacters: queryItemAllowed) ?? value)
     }
 
     // MARK: - Metrics

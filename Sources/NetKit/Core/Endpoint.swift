@@ -16,7 +16,9 @@ import Foundation
 public struct Endpoint: Sendable {
     /// Path relative to the client's `baseURL` (e.g. `"v1/users/42"`), or a full `http(s)://` URL.
     ///
-    /// Leading, trailing and repeated slashes in a relative path are ignored.
+    /// Leading, trailing and repeated slashes in a relative path are ignored. A relative path may
+    /// include a query (`"items?page=2"`), which is kept and merged with ``queryItems``.
+    /// Existing `%XX` escapes are kept as-is; other characters that aren't allowed are percent-encoded.
     /// A full URL bypasses `baseURL`; use ``SecurityPolicy/allowedHosts`` to restrict where requests can go.
     /// Interceptor-added credentials are not sent to hosts other than `baseURL`'s unless allowed there.
     public let path: String
