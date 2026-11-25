@@ -9,7 +9,7 @@ public extension NetworkClient {
 
     /// One-line request in the style of the old `APIManager.makeApi`.
     ///
-    /// - GET/DELETE: `parameter` becomes the URL query (keys sorted, values converted with `String(describing:)`).
+    /// - GET/DELETE: `parameter` becomes the URL query (keys sorted; see `parameter` for how values are sent).
     /// - POST/PUT/PATCH: `parameter` is sent as a JSON body with `Content-Type: application/json`.
     ///
     /// ```swift
@@ -23,7 +23,10 @@ public extension NetworkClient {
     ///   - url: Relative path or full `http(s)://` URL (see ``Endpoint/path``).
     ///   - method: HTTP method. Defaults to `.get`.
     ///   - parameter: Query values (GET/DELETE) or JSON body (POST/PUT/PATCH). Must be JSON-serializable for bodies.
-    ///     Unwrap optionals first: an `Int?` is sent in a query as `"Optional(2)"`.
+    ///     In a query: optionals are unwrapped and `nil`/`NSNull` values are left out; arrays repeat
+    ///     the key (`["ids": [1, 2]]` → `ids=1&ids=2`); `Bool` is `true`/`false`; other values use
+    ///     `String(describing:)` (nested dictionaries are not supported).
+    ///     In a JSON body: `nil` is sent as `null`.
     ///   - token: Sent only as `Authorization: Bearer <token>`, never in the URL.
     ///     A ``BearerTokenInterceptor`` on the client runs later and overrides it.
     ///   - headers: Extra request headers.
@@ -50,7 +53,7 @@ public extension NetworkClient {
             case .get, .delete:
                 queryItems = parameter
                     .sorted { $0.key < $1.key }
-                    .map { URLQueryItem(name: $0.key, value: Self.queryValue($0.value)) }
+                    .flatMap { Self.queryItems(name: $0.key, value: $0.value) }
             case .post, .put, .patch:
                 guard JSONSerialization.isValidJSONObject(parameter) else {
                     throw NetworkError.unknown(CallError.invalidJSONParameter)
@@ -83,6 +86,23 @@ private enum CallError: Error, CustomStringConvertible {
 }
 
 private extension NetworkClient {
+    /// nil / NSNull -> no item; array -> one item per element (key repeated); else one item.
+    static func queryItems(name: String, value: Any) -> [URLQueryItem] {
+        guard let value = unwrap(value) else { return [] }
+        if let array = value as? [Any] {
+            return array.compactMap(unwrap).map { URLQueryItem(name: name, value: queryValue($0)) }
+        }
+        return [URLQueryItem(name: name, value: queryValue(value))]
+    }
+
+    /// Unwraps any level of Optional; nil and NSNull become nil.
+    static func unwrap(_ value: Any) -> Any? {
+        if value is NSNull { return nil }
+        let mirror = Mirror(reflecting: value)
+        guard mirror.displayStyle == .optional else { return value }
+        return mirror.children.first.flatMap { unwrap($0.value) }
+    }
+
     static func queryValue(_ value: Any) -> String {
         if let bool = value as? Bool, type(of: value) == Bool.self { return bool ? "true" : "false" }
         return String(describing: value)

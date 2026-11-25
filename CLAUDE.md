@@ -27,7 +27,7 @@ Goal: reusable across apps from e-commerce to banking. Security must be configur
 - Tokens must never appear in logs, URLs, or error messages.
 
 ## Status
-- As of 2026-11-25 (pushed main @ 7475eaa): build clean, `swift test` 111/111 passing.
+- As of 2026-11-25 (pushed main @ 7475eaa): build clean, `swift test` 132/132 passing.
 - Done: security layers, `call` API, `LocalizedError`, network-free tests, optimization pass
   (all async APIs throw only `NetworkError` via internal `NetworkError.wrap(_:)`; interceptor and
   body-encoding errors surface as `.unknown(underlying)`), English doc comments on all public APIs.
@@ -40,6 +40,12 @@ Goal: reusable across apps from e-commerce to banking. Security must be configur
 - I1 fixed: NetworkMonitor caches the status from path updates; before the first update it is unknown
   and isConnected = true. Only `.unsatisfied` counts as offline (`.requiresConnection` = connected).
   Tests use internal `NetworkMonitor(startMonitoring: false)` + `update(_:)`.
+- I2 fixed: relative paths keep an inline `?query` (merged with queryItems) and existing `%XX` escapes;
+  queryItems are appended to the existing percent-encoded query (full-URL queries sent as written).
+  Inline query keys are now checked against blockedQueryKeys.
+- `+` in query item names/values (queryItems, request(query:), call) is sent as `%2B`.
+- I3 fixed: call() query values unwrap optionals, omit nil/NSNull, arrays repeat the key
+  (`ids=1&ids=2`). JSON bodies unchanged (nil -> null).
 - Doc comments describe current behaviour incl. the open bugs below. Update docs in the same commit as a fix.
 - Known gaps vs Architecture above (not yet built, need API approval):
   - `Net` shared shortcut does not exist.
@@ -51,8 +57,6 @@ Goal: reusable across apps from e-commerce to banking. Security must be configur
 Critical
 - None open (C1, C3 fixed).
 Important
-- Relative paths with `?` or `%` get percent-encoded (`items?page=2` -> `items%3Fpage=2`).
-- `call` sends Optional values as `Optional(2)` in query strings; arrays/dicts stringified.
 - `ExponentialBackoffRetry.maxAttempts` counts retries (3 -> up to 4 requests); delay > 60 s stops retrying.
   Tests deliberately don't pin the exact count until this is decided.
 - Blocked query keys / redaction are exact-name: `accessToken`, `refreshToken`, `X-Auth-Token` etc. slip
