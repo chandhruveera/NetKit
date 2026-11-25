@@ -94,7 +94,8 @@ public struct SecurityPolicy: Sendable {
         }
 
         // 10. Sensitive data URL query la anuppa koodadhu
-        if let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems {
+        if !blockedQueryKeys.isEmpty, url.query != nil,
+           let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems {
             for item in items where blockedQueryKeys.contains(item.name.lowercased()) {
                 throw NetworkError.security(.sensitiveQueryParameter(item.name))
             }

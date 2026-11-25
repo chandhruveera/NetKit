@@ -228,8 +228,9 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
     private func report(_ endpoint: Endpoint, status: Int?, bytes: Int, since startTime: TimeInterval) {
         guard let onMetrics else { return }
 
-        // Query string metrics la varadhu
-        let cleanPath = endpoint.path.components(separatedBy: "?").first ?? endpoint.path
+        // Query string metrics la varadhu (no allocation when there is no "?")
+        let path = endpoint.path
+        let cleanPath = path.firstIndex(of: "?").map { String(path[..<$0]) } ?? path
 
         onMetrics(NetworkMetrics(
             method: endpoint.method.rawValue,
