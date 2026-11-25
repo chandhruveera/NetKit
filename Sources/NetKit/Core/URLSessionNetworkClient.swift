@@ -5,33 +5,50 @@
 //  Created by Chandhru on 24/11/26.
 //
 
+
 import Foundation
 
 public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
-    private let baseURL: URL
+
+    // MARK: - Properties
+
+    private let baseURL: URL?
+    private let security: SecurityPolicy
     private let session: URLSession
+    private let securityDelegate: SecurityDelegate
     private let decoder: JSONDecoder
+    private let decoderLock = NSLock()
     private let interceptors: [RequestInterceptor]
     private let retryPolicy: RetryPolicy?
     private let monitor: NetworkMonitor?
     private let onMetrics: (@Sendable (NetworkMetrics) -> Void)?
 
+    // MARK: - Init
+
     public init(
-        baseURL: URL,
-        session: URLSession = .shared,
+        baseURL: URL? = nil,
+        security: SecurityPolicy = .standard,
+        sessionConfiguration: URLSessionConfiguration = .ephemeral,
         decoder: JSONDecoder = JSONDecoder(),
         interceptors: [RequestInterceptor] = [],
         retryPolicy: RetryPolicy? = nil,
         monitor: NetworkMonitor? = nil,
         onMetrics: (@Sendable (NetworkMetrics) -> Void)? = nil
     ) {
+        let secured = SecureSession.make(policy: security, configuration: sessionConfiguration)
         self.baseURL = baseURL
-        self.session = session
+        self.security = security
+        self.session = secured.session
+        self.securityDelegate = secured.delegate
         self.decoder = decoder
         self.interceptors = interceptors
         self.retryPolicy = retryPolicy
         self.monitor = monitor
         self.onMetrics = onMetrics
+    }
+
+    deinit {
+        session.finishTasksAndInvalidate()
     }
 
     // MARK: - Public API
@@ -40,21 +57,58 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
         _ endpoint: Endpoint,
         as type: T.Type = T.self
     ) async throws -> T {
-        // Offline na retry pannaama udane fail
-        if let monitor, !monitor.isConnected {
-            throw NetworkError.noConnection
+
+        var endpoint = endpoint
+
+        // Layer 8: POST/PATCH ku idempotency key (opt-in). Ella retries-kum same key.
+        if security.idempotencyKeys,
+           !endpoint.method.isIdempotent,
+           endpoint.headers["Idempotency-Key"] == nil {
+            endpoint.headers["Idempotency-Key"] = UUID().uuidString
         }
 
+        // POST/PATCH retry: idempotency keys on irundha mattum
+        let canRetry = endpoint.method.isIdempotent || security.idempotencyKeys
+
         var attempt = 0
+
         while true {
+            if Task.isCancelled { throw NetworkError.cancelled }
+
+            if let monitor, !monitor.isConnected {
+                throw NetworkError.noConnection
+            }
+
             do {
                 return try await perform(endpoint, as: type)
+
             } catch let error as NetworkError {
+
+                // Intha errors retry aagakoodadhu
+                switch error {
+                case .cancelled, .unauthorized, .security:
+                    throw error
+                default:
+                    break
+                }
+
+                guard canRetry else { throw error }
+
                 attempt += 1
-                guard let delay = retryPolicy?.delay(for: error, attempt: attempt) else {
+
+                guard let delay = retryPolicy?.delay(for: error, attempt: attempt),
+                      delay.isFinite, delay > 0, delay <= 60 else {
                     throw error
                 }
-                try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+
+                do {
+                    try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                } catch {
+                    throw NetworkError.cancelled
+                }
+
+            } catch is CancellationError {
+                throw NetworkError.cancelled
             }
         }
     }
@@ -65,76 +119,107 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
         _ endpoint: Endpoint,
         as type: T.Type
     ) async throws -> T {
+
+        // 1. Request build
         var request = try makeRequest(from: endpoint)
+
+        // 2. Interceptors (token header inga add aagum)
         for interceptor in interceptors {
+            if Task.isCancelled { throw NetworkError.cancelled }
             request = try await interceptor.adapt(request)
         }
 
-        let start = ProcessInfo.processInfo.systemUptime
+        // 3. Security layers (1, 2, 6, 9, 10, 11, 12)
+        request = try await security.apply(to: request)
+
+        // 4. Network call
+        let startTime = ProcessInfo.processInfo.systemUptime
         let data: Data
         let response: URLResponse
+
         do {
             (data, response) = try await session.data(for: request)
+
         } catch let error as URLError {
-            report(endpoint, status: nil, bytes: 0, since: start)
+            report(endpoint, status: nil, bytes: 0, since: startTime)
+
+            // Layer 4: pinning fail aana
+            if let host = request.url?.host, securityDelegate.takePinFailure(host: host) {
+                throw NetworkError.security(.pinningFailed(host))
+            }
             throw Self.map(error)
+
+        } catch is CancellationError {
+            report(endpoint, status: nil, bytes: 0, since: startTime)
+            throw NetworkError.cancelled
+
         } catch {
-            report(endpoint, status: nil, bytes: 0, since: start)
+            report(endpoint, status: nil, bytes: 0, since: startTime)
             throw NetworkError.unknown(error)
         }
 
+        // 5. Response validation
         guard let http = response as? HTTPURLResponse else {
+            report(endpoint, status: nil, bytes: data.count, since: startTime)
             throw NetworkError.unknown(URLError(.badServerResponse))
         }
-        report(endpoint, status: http.statusCode, bytes: data.count, since: start)
+
+        report(endpoint, status: http.statusCode, bytes: data.count, since: startTime)
 
         guard (200..<300).contains(http.statusCode) else {
             if http.statusCode == 401 { throw NetworkError.unauthorized(data) }
             throw NetworkError.httpError(statusCode: http.statusCode, data: data)
         }
 
-        // Body illa (204, delete, logout) na EmptyResponse return pannalam
+        // 6. Empty body (204, delete, logout)
         if data.isEmpty, let empty = EmptyResponse() as? T {
             return empty
         }
 
+        // 7. Decode
         do {
-            return try decoder.decode(T.self, from: data)
+            return try decode(data, as: type)
         } catch {
             throw NetworkError.decoding(error)
         }
     }
 
-    // MARK: - Helpers
+    // MARK: - Decoding
 
-    private func report(_ endpoint: Endpoint, status: Int?, bytes: Int, since start: TimeInterval) {
-        guard let onMetrics else { return }
-        onMetrics(NetworkMetrics(
-            method: endpoint.method.rawValue,
-            path: endpoint.path,
-            statusCode: status,
-            duration: ProcessInfo.processInfo.systemUptime - start,
-            responseBytes: bytes
-        ))
+    private func decode<T: Decodable>(_ data: Data, as type: T.Type) throws -> T {
+        decoderLock.lock()
+        defer { decoderLock.unlock() }
+        return try decoder.decode(type, from: data)
     }
 
+    // MARK: - Request builder (relative path + full URL rendum support)
+
     private func makeRequest(from endpoint: Endpoint) throws -> URLRequest {
-        guard var components = URLComponents(
-            url: baseURL.appendingPathComponent(endpoint.path),
-            resolvingAgainstBaseURL: false
-        ) else {
+        let rawPath = endpoint.path
+        let url: URL
+
+        if rawPath.lowercased().hasPrefix("https://") || rawPath.lowercased().hasPrefix("http://") {
+            guard let absolute = URL(string: rawPath) else { throw NetworkError.invalidURL }
+            url = absolute
+        } else {
+            guard let baseURL else { throw NetworkError.invalidURL }
+            let path = rawPath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            url = path
+                .split(separator: "/")
+                .reduce(baseURL) { $0.appendingPathComponent(String($1)) }
+        }
+
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
             throw NetworkError.invalidURL
         }
 
         if !endpoint.queryItems.isEmpty {
-            components.queryItems = endpoint.queryItems
+            components.queryItems = (components.queryItems ?? []) + endpoint.queryItems
         }
 
-        guard let url = components.url else {
-            throw NetworkError.invalidURL
-        }
+        guard let finalURL = components.url else { throw NetworkError.invalidURL }
 
-        var request = URLRequest(url: url)
+        var request = URLRequest(url: finalURL)
         request.httpMethod = endpoint.method.rawValue
         request.httpBody = endpoint.body
         for (key, value) in endpoint.headers {
@@ -143,16 +228,31 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
         return request
     }
 
+    // MARK: - Metrics
+
+    private func report(_ endpoint: Endpoint, status: Int?, bytes: Int, since startTime: TimeInterval) {
+        guard let onMetrics else { return }
+
+        // Query string metrics la varadhu
+        let cleanPath = endpoint.path.components(separatedBy: "?").first ?? endpoint.path
+
+        onMetrics(NetworkMetrics(
+            method: endpoint.method.rawValue,
+            path: cleanPath,
+            statusCode: status,
+            duration: ProcessInfo.processInfo.systemUptime - startTime,
+            responseBytes: bytes
+        ))
+    }
+
+    // MARK: - Error mapping
+
     private static func map(_ error: URLError) -> NetworkError {
         switch error.code {
-        case .notConnectedToInternet, .networkConnectionLost:
-            return .noConnection
-        case .timedOut:
-            return .timeout
-        case .cancelled:
-            return .cancelled
-        default:
-            return .unknown(error)
+        case .notConnectedToInternet, .networkConnectionLost: return .noConnection
+        case .timedOut: return .timeout
+        case .cancelled: return .cancelled
+        default: return .unknown(error)
         }
     }
 }

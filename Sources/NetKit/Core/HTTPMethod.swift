@@ -6,4 +6,12 @@ public enum HTTPMethod: String, Sendable {
     case put = "PUT"
     case patch = "PATCH"
     case delete = "DELETE"
+
+    /// POST/PATCH thirumba anuppina duplicate aagalam
+    var isIdempotent: Bool {
+        switch self {
+        case .get, .put, .delete: return true
+        case .post, .patch: return false
+        }
+    }
 }
