@@ -70,6 +70,9 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
         // POST/PATCH retry: idempotency keys on irundha mattum
         let canRetry = endpoint.method.isIdempotent || security.idempotencyKeys
 
+        // URL + headers ore oru thadava build; interceptors/security ovvoru attempt-kum run aagum
+        let baseRequest = try makeRequest(from: endpoint)
+
         var attempt = 0
 
         while true {
@@ -80,7 +83,7 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
             }
 
             do {
-                return try await perform(endpoint, as: type)
+                return try await perform(baseRequest, for: endpoint, as: type)
 
             } catch let error as NetworkError {
 
@@ -116,12 +119,12 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
     // MARK: - Core
 
     private func perform<T: Decodable>(
-        _ endpoint: Endpoint,
+        _ baseRequest: URLRequest,
+        for endpoint: Endpoint,
         as type: T.Type
     ) async throws -> T {
 
-        // 1. Request build
-        var request = try makeRequest(from: endpoint)
+        var request = baseRequest
 
         // 2. Interceptors (token header inga add aagum)
         for interceptor in interceptors {
