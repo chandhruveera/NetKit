@@ -24,7 +24,7 @@ public struct LoggingInterceptor: RequestInterceptor {
         #if DEBUG
         let headers = (request.allHTTPHeaderFields ?? [:])
             .map { key, value in
-                Redactor.sensitiveHeaders.contains(key.lowercased()) ? "\(key): ***" : "\(key): \(value)"
+                Redactor.isSensitiveHeader(key) ? "\(key): ***" : "\(key): \(value)"
             }
             .sorted()
             .joined(separator: ", ")
