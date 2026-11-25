@@ -199,21 +199,20 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
             url = absolute
         } else {
             guard let baseURL else { throw NetworkError.invalidURL }
-            let path = rawPath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-            url = path
-                .split(separator: "/")
-                .reduce(baseURL) { $0.appendingPathComponent(String($1)) }
+            // Empty segments drop aagum: "/v1//items/" -> "v1/items". Ore oru URL allocation.
+            let path = rawPath.split(separator: "/").joined(separator: "/")
+            url = path.isEmpty ? baseURL : baseURL.appendingPathComponent(path)
         }
 
-        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
-            throw NetworkError.invalidURL
-        }
-
+        var finalURL = url
         if !endpoint.queryItems.isEmpty {
+            guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+                throw NetworkError.invalidURL
+            }
             components.queryItems = (components.queryItems ?? []) + endpoint.queryItems
+            guard let merged = components.url else { throw NetworkError.invalidURL }
+            finalURL = merged
         }
-
-        guard let finalURL = components.url else { throw NetworkError.invalidURL }
 
         var request = URLRequest(url: finalURL)
         request.httpMethod = endpoint.method.rawValue
