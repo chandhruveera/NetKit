@@ -110,6 +110,27 @@ final class URLBuildingTests: XCTestCase {
         }
     }
 
+    // MARK: - Blocked query keys: separators and case are ignored
+
+    func test_blockedQueryKey_variants_areBlocked() async {
+        for key in ["accessToken", "Access-Token", "ACCESS_TOKEN", "refreshToken", "apiKey", "idToken", "Card-Number"] {
+            do {
+                _ = try await finalURL("items", query: [URLQueryItem(name: key, value: "x")])
+                XCTFail("\(key) should be blocked")
+            } catch NetworkError.security(.sensitiveQueryParameter(let name)) {
+                XCTAssertEqual(name, key)
+            } catch {
+                XCTFail("\(key): wrong error \(error)")
+            }
+        }
+    }
+
+    func test_paginationTokens_areNotBlocked() async throws {
+        let url = try await finalURL("items", query: [URLQueryItem(name: "pageToken", value: "p2"),
+                                                      URLQueryItem(name: "next_token", value: "n")])
+        XCTAssertEqual(url, "https://test.com/items?pageToken=p2&next_token=n")
+    }
+
     // MARK: - "+" in query values
 
     func test_plusInQueryItemValue_isEncoded() async throws {

@@ -65,7 +65,9 @@ public struct SecurityPolicy: Sendable {
 
     // Data hygiene (10)
 
-    /// Query keys that may never appear in a URL (matched case-insensitively, exact name).
+    /// Query keys that may never appear in a URL. Matching ignores case and `_ - .` separators
+    /// (`access_token` also blocks `accessToken` and `Access-Token`) but is otherwise exact,
+    /// so pagination keys like `pageToken` or `next_token` are allowed.
     /// Requests containing one fail with ``SecurityViolation/sensitiveQueryParameter(_:)``.
     /// Default ``Redactor/sensitiveKeys``.
     public var blockedQueryKeys: Set<String> = Redactor.sensitiveKeys
@@ -164,7 +166,9 @@ public struct SecurityPolicy: Sendable {
         // 10. Sensitive data URL query la anuppa koodadhu
         if !blockedQueryKeys.isEmpty, url.query != nil,
            let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems {
-            for item in items where blockedQueryKeys.contains(item.name.lowercased()) {
+            // Case + separators ignore: accessToken == access_token. Exact match: pageToken allowed.
+            let blocked = Set(blockedQueryKeys.map(Redactor.normalize))
+            for item in items where blocked.contains(Redactor.normalize(item.name)) {
                 throw NetworkError.security(.sensitiveQueryParameter(item.name))
             }
         }
