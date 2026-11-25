@@ -94,6 +94,32 @@ final class CredentialScopeTests: XCTestCase {
         XCTAssertNil(captured.header("Authorization"))
     }
 
+    func test_foreignHost_customTokenHeaderFromInterceptor_removed() async throws {
+        struct CustomToken: RequestInterceptor {
+            func adapt(_ request: URLRequest) async throws -> URLRequest {
+                var r = request
+                r.setValue("T1", forHTTPHeaderField: "X-Auth-Token")
+                r.setValue("T2", forHTTPHeaderField: "X-Access-Token")
+                r.setValue("abc", forHTTPHeaderField: "X-Request-Id")
+                return r
+            }
+        }
+        let captured = Captured()
+        MockURLProtocol.handler = { request in captured.set(request); return (mockResponse(request, 200), Data()) }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MockURLProtocol.self]
+        let c = URLSessionNetworkClient(baseURL: URL(string: "https://api.shop.com")!,
+                                        sessionConfiguration: config, interceptors: [CustomToken()])
+
+        try await get(c, "https://cdn.other.com/img")
+        XCTAssertNil(captured.header("X-Auth-Token"))
+        XCTAssertNil(captured.header("X-Access-Token"))
+        XCTAssertEqual(captured.header("X-Request-Id"), "abc", "non-sensitive headers are kept")
+
+        try await get(c, "orders")
+        XCTAssertEqual(captured.header("X-Auth-Token"), "T1", "trusted host still gets it")
+    }
+
     // MARK: - Explicit per-request credentials are kept
 
     func test_explicitToken_toForeignHost_isSent() async throws {

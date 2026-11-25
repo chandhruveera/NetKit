@@ -50,8 +50,8 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
     ///   - baseURL: Base for relative ``Endpoint/path`` values. Without it only full URLs work.
     ///   - security: Transport and request security rules. Defaults to ``SecurityPolicy/standard``.
     ///
-    /// **Credential scope:** sensitive headers (``Redactor/sensitiveHeaders``, e.g. `Authorization`,
-    /// `X-Api-Key`) added by interceptors are only sent to trusted hosts: those matching
+    /// **Credential scope:** sensitive headers (``Redactor/sensitiveHeaders`` plus names like
+    /// `X-Auth-Token` that match the ``Redactor/redact(_:)`` key rules) added by interceptors are only sent to trusted hosts: those matching
     /// ``SecurityPolicy/allowedHosts`` if set, otherwise exactly `baseURL`'s host. For any other host
     /// they are reset to what the ``Endpoint`` set explicitly (e.g. via `call(token:)`), or removed.
     /// With neither `allowedHosts` nor `baseURL`, credentials are not restricted.
@@ -229,7 +229,7 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
 
     // MARK: - Credential scope
 
-    /// For hosts outside `credentialHosts`, resets every sensitive header to the value the caller
+    /// For hosts outside `credentialHosts`, resets every sensitive header (Redactor.isSensitiveHeader) to the value the caller
     /// set explicitly on the Endpoint (or removes it), undoing what interceptors added.
     private func scopeCredentials(_ request: URLRequest, explicit: URLRequest) -> URLRequest {
         guard let credentialHosts,
@@ -238,7 +238,8 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
             return request
         }
         var request = request
-        for name in Redactor.sensitiveHeaders {
+        let names = Set((request.allHTTPHeaderFields ?? [:]).keys).union(Redactor.sensitiveHeaders)
+        for name in names where Redactor.isSensitiveHeader(name) {
             request.setValue(explicit.value(forHTTPHeaderField: name), forHTTPHeaderField: name)
         }
         return request
