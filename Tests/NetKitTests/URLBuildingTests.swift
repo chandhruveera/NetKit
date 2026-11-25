@@ -110,6 +110,19 @@ final class URLBuildingTests: XCTestCase {
         }
     }
 
+    // MARK: - "+" in query values
+
+    func test_plusInQueryItemValue_isEncoded() async throws {
+        let url = try await finalURL("users", query: [URLQueryItem(name: "email", value: "a+b@x.com"),
+                                                      URLQueryItem(name: "phone", value: "+91 98")])
+        XCTAssertEqual(url, "https://test.com/users?email=a%2Bb@x.com&phone=%2B91%2098")
+    }
+
+    func test_plusWrittenInURLString_isLeftAsWritten() async throws {
+        let url = try await finalURL("https://other.com/x?q=a+b")
+        XCTAssertEqual(url, "https://other.com/x?q=a+b")
+    }
+
     func test_queryItemValues_arePercentEncoded() async throws {
         let url = try await finalURL("items", query: [URLQueryItem(name: "q", value: "a b&c")])
         XCTAssertEqual(url, "https://test.com/items?q=a%20b%26c")

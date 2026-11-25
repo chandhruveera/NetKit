@@ -25,6 +25,7 @@ public struct Endpoint: Sendable {
     /// HTTP method. Defaults to ``HTTPMethod/get``.
     public let method: HTTPMethod
     /// Query parameters appended to the URL (after any query already in `path`).
+    /// Names and values are percent-encoded, including `+` (sent as `%2B`, so servers don't read it as a space).
     /// Keys listed in ``SecurityPolicy/blockedQueryKeys`` are rejected before sending.
     public var queryItems: [URLQueryItem]
     /// Extra request headers. Interceptors run afterwards and may override them.

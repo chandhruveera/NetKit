@@ -318,10 +318,11 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
         return text.addingPercentEncoding(withAllowedCharacters: allowedWithPercent) ?? text
     }
 
-    /// Characters left as-is in a query item name or value (same set URLComponents uses).
+    /// Characters left as-is in a query item name or value. Unlike URLComponents, "+" is encoded
+    /// as %2B because most servers decode a literal "+" in a query as a space.
     private static let queryItemAllowed: CharacterSet = {
         var set = CharacterSet.urlQueryAllowed
-        set.remove(charactersIn: "&=")
+        set.remove(charactersIn: "&=+")
         return set
     }()
 
