@@ -27,13 +27,16 @@ Goal: reusable across apps from e-commerce to banking. Security must be configur
 - Tokens must never appear in logs, URLs, or error messages.
 
 ## Status
-- As of 2026-11-25 (pushed main @ 7475eaa): build clean, `swift test` 95/95 passing.
+- As of 2026-11-25 (pushed main @ 7475eaa): build clean, `swift test` 102/102 passing.
 - Done: security layers, `call` API, `LocalizedError`, network-free tests, optimization pass
   (all async APIs throw only `NetworkError` via internal `NetworkError.wrap(_:)`; interceptor and
   body-encoding errors surface as `.unknown(underlying)`), English doc comments on all public APIs.
 - C1 fixed (credential scope): sensitive headers added by interceptors are reset/removed for hosts
   outside allowedHosts (or baseURL's host when allowedHosts is nil). Explicit Endpoint/call(token:)
   headers are kept. No trust info (no baseURL, no allowedHosts) = unrestricted. See CredentialScopeTests.
+- C3 fixed: CertificatePinning supports `*.` wildcard keys (exact > most specific wildcard). When
+  allowedHosts AND pinning are set (banking), a host without a matching pin fails closed with
+  .pinningFailed. Without allowedHosts, pinning stays per-host opt-in. Verified live against apple.com.
 - Doc comments describe current behaviour incl. the open bugs below. Update docs in the same commit as a fix.
 - Known gaps vs Architecture above (not yet built, need API approval):
   - `Net` shared shortcut does not exist.
@@ -43,8 +46,7 @@ Goal: reusable across apps from e-commerce to banking. Security must be configur
 
 ## Open issues (from reviews, not fixed yet; most change defaults or public API -> ask first)
 Critical
-- Pinning only applies to exact-host pin entries; `banking(allowedHosts: ["*.bank.com"], ...)` leaves
-  subdomains without pins unpinned. `banking()` doesn't check hosts vs pins.
+- None open (C1, C3 fixed).
 Important
 - NetworkMonitor reports offline right after start (NWPathMonitor starts `unsatisfied`), so fail-fast
   can reject the first request. Not testable until the monitor can be injected.

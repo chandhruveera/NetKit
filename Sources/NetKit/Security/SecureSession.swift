@@ -37,8 +37,16 @@ final class SecurityDelegate: NSObject, URLSessionTaskDelegate, @unchecked Senda
         }
 
         let host = challenge.protectionSpace.host.lowercased()
-        guard let expected = policy.pinning?.pins(for: host) else {
-            return (.performDefaultHandling, nil)       // intha host pin panna host illa
+        guard let pinning = policy.pinning else {
+            return (.performDefaultHandling, nil)       // pinning configure pannala
+        }
+        guard let expected = pinning.pins(for: host) else {
+            // C3: allowedHosts irundha ella host-um pin aaganum. Pin illa na fail closed.
+            if policy.allowedHosts != nil {
+                recordPinFailure(host)
+                return (.cancelAuthenticationChallenge, nil)
+            }
+            return (.performDefaultHandling, nil)       // allowedHosts illa: per-host opt-in
         }
 
         // Mudhal la normal trust validation

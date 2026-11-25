@@ -46,7 +46,11 @@ public struct SecurityPolicy: Sendable {
 
     // Trust (4-5)
 
-    /// Certificate pins. Hosts without pins use normal system trust only. Default `nil`.
+    /// Certificate pins (exact or `*.` wildcard hosts). Default `nil`.
+    ///
+    /// When ``allowedHosts`` is also set, every host must have a matching pin or the connection
+    /// fails with ``SecurityViolation/pinningFailed(_:)``. Without `allowedHosts`, hosts with no
+    /// matching pin use normal system trust.
     public var pinning: CertificatePinning? = nil
     /// Block redirects to a different host, and HTTPS→HTTP redirects when ``requireHTTPS`` is on.
     /// A blocked redirect surfaces as ``NetworkError/httpError(statusCode:data:)`` with the 3xx status. Default `true`.
@@ -117,8 +121,9 @@ public struct SecurityPolicy: Sendable {
     /// For banking and payment apps: ``strict(allowedHosts:)`` plus certificate pinning,
     /// a 15 second timeout and optional device integrity / attestation hooks.
     ///
-    /// - Important: Only hosts with an entry in `pinning` are pinned. Every host matched by
-    ///   `allowedHosts` (including wildcard matches) should have pins.
+    /// - Important: Every host reachable through `allowedHosts` must have a matching pin (exact or
+    ///   `*.` wildcard); connections to an allowed host without one fail closed with
+    ///   ``SecurityViolation/pinningFailed(_:)``.
     /// - Parameters:
     ///   - allowedHosts: Hosts requests may go to.
     ///   - pinning: SPKI pins per host (current + backup).

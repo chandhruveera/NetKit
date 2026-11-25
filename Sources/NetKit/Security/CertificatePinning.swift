@@ -15,6 +15,12 @@ import Security
 /// one certificate in the chain has a matching pin; otherwise it fails closed with
 /// ``SecurityViolation/pinningFailed(_:)``. Supported keys: RSA 2048/4096, EC P-256/P-384.
 ///
+/// Host keys may be exact (`"api.bank.com"`) or wildcards (`"*.bank.com"`, any subdomain but not
+/// `bank.com` itself). An exact key wins over wildcards; among wildcards the most specific wins.
+///
+/// Hosts with no matching key: when ``SecurityPolicy/allowedHosts`` is set (e.g. ``SecurityPolicy/banking(allowedHosts:pinning:integrityCheck:attestation:)``)
+/// the connection is rejected (fail closed). Without `allowedHosts`, such hosts use normal system trust.
+///
 /// Generate a pin with:
 /// ```
 /// openssl s_client -connect api.bank.com:443 -servername api.bank.com </dev/null \
@@ -24,7 +30,7 @@ import Security
 public struct CertificatePinning: Sendable {
     private let pinsByHost: [String: Set<String>]
 
-    /// - Parameter pins: Exact host name (case-insensitive) → base64 SHA-256 SPKI hashes.
+    /// - Parameter pins: Host name or `*.` wildcard (case-insensitive) → base64 SHA-256 SPKI hashes.
     ///   Always include at least two per host (current + backup key) so a certificate
     ///   rotation doesn't lock users out. Fewer than two triggers an assertion in DEBUG builds.
     public init(_ pins: [String: Set<String>]) {
@@ -35,8 +41,14 @@ public struct CertificatePinning: Sendable {
         self.pinsByHost = pins.reduce(into: [:]) { $0[$1.key.lowercased()] = $1.value }
     }
 
+    /// Exact host key first, then the most specific matching `*.` wildcard key.
     func pins(for host: String) -> Set<String>? {
-        pinsByHost[host.lowercased()]
+        let host = host.lowercased()
+        if let exact = pinsByHost[host] { return exact }
+        return pinsByHost
+            .filter { $0.key.hasPrefix("*.") && SecurityPolicy.matches(host, in: [$0.key]) }
+            .max { $0.key.count < $1.key.count }?
+            .value
     }
 
     // MARK: - SPKI hash

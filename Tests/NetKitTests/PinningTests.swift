@@ -52,10 +52,16 @@ final class PinningTests: XCTestCase {
         )
     }
 
-    private func delegate(pins: [String: Set<String>]?) -> SecurityDelegate {
+    private func delegate(pins: [String: Set<String>]?, allowedHosts: Set<String>? = nil) -> SecurityDelegate {
         var policy = SecurityPolicy.standard
         policy.pinning = pins.map { CertificatePinning($0) }
+        policy.allowedHosts = allowedHosts
         return SecurityDelegate(policy: policy)
+    }
+
+    private func decide(_ d: SecurityDelegate, host: String = "pinned.test") async -> URLSession.AuthChallengeDisposition {
+        let t = trust(cert(Self.rsaCertDER), host: host, anchored: true)
+        return await d.urlSession(.shared, didReceive: challenge(host: host, trust: t)).0
     }
 
     // MARK: - SPKI hash
@@ -155,6 +161,66 @@ final class PinningTests: XCTestCase {
         let (disposition, _) = await d.urlSession(.shared, didReceive: basic)
 
         XCTAssertEqual(disposition, .performDefaultHandling)
+    }
+
+    // MARK: - Wildcard pins (C3)
+
+    func test_wildcardPins_lookup() {
+        let pinning = CertificatePinning([
+            "api.bank.com": ["exact1", "exact2"],
+            "*.bank.com": ["wild1", "wild2"],
+            "*.eu.bank.com": ["eu1", "eu2"],
+        ])
+        XCTAssertEqual(pinning.pins(for: "api.bank.com"), ["exact1", "exact2"], "exact key wins")
+        XCTAssertEqual(pinning.pins(for: "PAY.bank.com"), ["wild1", "wild2"])
+        XCTAssertEqual(pinning.pins(for: "x.eu.bank.com"), ["eu1", "eu2"], "most specific wildcard wins")
+        XCTAssertNil(pinning.pins(for: "bank.com"), "*. does not match the bare domain")
+        XCTAssertNil(pinning.pins(for: "evilbank.com"))
+    }
+
+    func test_wildcardPin_matchingKey_usesCredential() async {
+        let d = delegate(pins: ["*.test": [Self.rsaPin, "backup"]])
+        let result = await decide(d)
+        XCTAssertEqual(result, .useCredential)
+    }
+
+    func test_exactPin_takesPriorityOverWildcard() async {
+        let d = delegate(pins: ["pinned.test": ["wrong1", "wrong2"], "*.test": [Self.rsaPin, "backup"]])
+        let result = await decide(d)
+        XCTAssertEqual(result, .cancelAuthenticationChallenge)
+    }
+
+    // MARK: - Fail closed for unpinned hosts when allowedHosts is set (C3)
+
+    func test_unpinnedHost_withAllowedHosts_failsClosed() async {
+        let d = delegate(pins: ["other.test": [Self.rsaPin, "backup"]], allowedHosts: ["*.test"])
+        let result = await decide(d)
+        XCTAssertEqual(result, .cancelAuthenticationChallenge)
+        XCTAssertTrue(d.takePinFailure(host: "pinned.test"))
+    }
+
+    func test_bankingPreset_wildcardAllowedHost_withoutPin_failsClosed() async {
+        let policy = SecurityPolicy.banking(
+            allowedHosts: ["api.test", "*.test"],
+            pinning: CertificatePinning(["api.test": [Self.rsaPin, "backup"]])
+        )
+        let result = await decide(SecurityDelegate(policy: policy))
+        XCTAssertEqual(result, .cancelAuthenticationChallenge)
+    }
+
+    func test_bankingPreset_wildcardPin_coversSubdomain() async {
+        let policy = SecurityPolicy.banking(
+            allowedHosts: ["*.test"],
+            pinning: CertificatePinning(["*.test": [Self.rsaPin, "backup"]])
+        )
+        let result = await decide(SecurityDelegate(policy: policy))
+        XCTAssertEqual(result, .useCredential)
+    }
+
+    func test_unpinnedHost_withoutAllowedHosts_staysOptIn() async {
+        let d = delegate(pins: ["other.test": [Self.rsaPin, "backup"]], allowedHosts: nil)
+        let result = await decide(d)
+        XCTAssertEqual(result, .performDefaultHandling)
     }
 }
 

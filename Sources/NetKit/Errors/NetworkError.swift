@@ -17,7 +17,8 @@ public enum SecurityViolation: Error, Sendable {
     case sensitiveQueryParameter(String)
     /// ``SecurityPolicy/integrityCheck`` returned `false`.
     case integrityCheckFailed
-    /// TLS validation or certificate pinning failed for this host. Nothing was sent.
+    /// TLS validation or certificate pinning failed for this host, or the host has no pin while
+    /// ``SecurityPolicy/allowedHosts`` and ``SecurityPolicy/pinning`` are both set. Nothing was sent.
     case pinningFailed(String)
 }
 
