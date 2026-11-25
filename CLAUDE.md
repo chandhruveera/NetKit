@@ -27,7 +27,7 @@ Goal: reusable across apps from e-commerce to banking. Security must be configur
 - Tokens must never appear in logs, URLs, or error messages.
 
 ## Status
-- As of 2026-11-25 (pushed main @ 7475eaa): build clean, `swift test` 165/165 passing.
+- As of 2026-11-25 (pushed main @ 7475eaa): build clean, `swift test` 172/172 passing (debug and release).
 - Done: security layers, `call` API, `LocalizedError`, network-free tests, optimization pass
   (all async APIs throw only `NetworkError` via internal `NetworkError.wrap(_:)`; interceptor and
   body-encoding errors surface as `.unknown(underlying)`), English doc comments on all public APIs.
@@ -67,6 +67,10 @@ Goal: reusable across apps from e-commerce to banking. Security must be configur
 - Decoder: the client keeps its own copy (`URLSessionNetworkClient.privateCopy(of:)` copies all
   JSONDecoder settings; subclasses are used as-is). No lock, so decodes run in parallel (TSan clean).
   If JSONDecoder gains new settings, add them to privateCopy + DecoderTests.
+- R1 fixed: `.relaxed` sets internal `isDevelopmentOnly` (kept by modified copies); in non-DEBUG builds
+  every request with it fails with .security(.insecureConnection) before sending (TestFlight too).
+  Explicit opt-in still works: `.standard` + `requireHTTPS = false`. Tests use internal
+  `apply(to:isDebugBuild:)`; check the real flag with `swift test -c release -Xswiftc -enable-testing`.
 - Doc comments describe current behaviour incl. the open bugs below. Update docs in the same commit as a fix.
 - Known gaps vs Architecture above (not yet built, need API approval):
   - `Net` shared shortcut does not exist.
@@ -80,7 +84,6 @@ Critical
 Important
 - Callback `request(...onSuccess:onFailure:)` can't be cancelled; closures not typed `@MainActor`
   (only source of strict-concurrency warnings).
-- Nothing stops `.relaxed` from shipping in release builds.
 - `HTTPMethod`, `NetworkError`, `SecurityViolation` are public non-frozen enums: settle cases before 1.0.
 
 ## Testing notes

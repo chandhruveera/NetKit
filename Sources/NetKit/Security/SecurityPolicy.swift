@@ -16,7 +16,7 @@ import Foundation
 /// | ``standard`` | e-commerce, social, content | HTTPS, TLS 1.2+, redirect + query-key protection |
 /// | ``strict(allowedHosts:)`` | fintech, wallet, health | host allowlist, no cache/cookies, 20 s timeout |
 /// | ``banking(allowedHosts:pinning:integrityCheck:attestation:)`` | banking, payments | pinning, 15 s timeout, device hooks |
-/// | ``relaxed`` | local dev / staging only | allows HTTP, no TLS minimum, no blocked keys |
+/// | ``relaxed`` | local dev / staging, DEBUG builds only | allows HTTP, no TLS minimum, no blocked keys |
 ///
 /// ```swift
 /// var policy = SecurityPolicy.strict(allowedHosts: ["api.shop.com"])
@@ -96,6 +96,9 @@ public struct SecurityPolicy: Sendable {
     /// ``attestationHeader`` (e.g. an App Attest assertion). Default `nil`.
     public var attestationProvider: (@Sendable (URLRequest) async -> String?)? = nil
 
+    /// Set only by ``relaxed`` (kept by modified copies). Such policies block every request in Release builds.
+    var isDevelopmentOnly = false
+
     /// Creates a policy with the ``standard`` defaults.
     public init() {}
 
@@ -107,9 +110,14 @@ public struct SecurityPolicy: Sendable {
 
     /// For local development and staging only: allows plain HTTP, no TLS minimum, no blocked query keys.
     ///
-    /// - Warning: Do not ship this in release builds.
+    /// - Important: Works in DEBUG builds only. In Release builds (App Store **and TestFlight**) every
+    ///   request made with this policy, or a modified copy of it, fails with
+    ///   ``SecurityViolation/insecureConnection`` before it is sent. If a release build really needs
+    ///   plain HTTP (e.g. a LAN/IoT device), opt in explicitly:
+    ///   `var p = SecurityPolicy.standard; p.requireHTTPS = false`.
     public static var relaxed: SecurityPolicy {
         var p = SecurityPolicy()
+        p.isDevelopmentOnly = true
         p.requireHTTPS = false
         p.minimumTLS = nil
         p.blockedQueryKeys = []
@@ -154,7 +162,12 @@ public struct SecurityPolicy: Sendable {
 
     // MARK: - Request-level checks (layers 1, 2, 6, 9, 10, 11, 12)
 
-    func apply(to request: URLRequest) async throws -> URLRequest {
+    func apply(to request: URLRequest, isDebugBuild: Bool = SecurityPolicy.isDebugBuild) async throws -> URLRequest {
+        // R1: .relaxed release build la ship aaga koodadhu
+        if isDevelopmentOnly, !isDebugBuild {
+            throw NetworkError.security(.insecureConnection)
+        }
+
         var request = request
         guard let url = request.url, let host = url.host?.lowercased() else {
             throw NetworkError.invalidURL
@@ -199,6 +212,14 @@ public struct SecurityPolicy: Sendable {
         // 9. Timeout cap
         request.timeoutInterval = min(request.timeoutInterval, requestTimeout)
         return request
+    }
+
+    static var isDebugBuild: Bool {
+        #if DEBUG
+        return true
+        #else
+        return false
+        #endif
     }
 
     static func isLocalDebugHost(_ host: String) -> Bool {
