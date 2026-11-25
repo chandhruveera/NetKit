@@ -27,7 +27,7 @@ Goal: reusable across apps from e-commerce to banking. Security must be configur
 - Tokens must never appear in logs, URLs, or error messages.
 
 ## Status
-- As of 2026-11-25 (pushed main @ 7475eaa): build clean, `swift test` 102/102 passing.
+- As of 2026-11-25 (pushed main @ 7475eaa): build clean, `swift test` 111/111 passing.
 - Done: security layers, `call` API, `LocalizedError`, network-free tests, optimization pass
   (all async APIs throw only `NetworkError` via internal `NetworkError.wrap(_:)`; interceptor and
   body-encoding errors surface as `.unknown(underlying)`), English doc comments on all public APIs.
@@ -37,6 +37,9 @@ Goal: reusable across apps from e-commerce to banking. Security must be configur
 - C3 fixed: CertificatePinning supports `*.` wildcard keys (exact > most specific wildcard). When
   allowedHosts AND pinning are set (banking), a host without a matching pin fails closed with
   .pinningFailed. Without allowedHosts, pinning stays per-host opt-in. Verified live against apple.com.
+- I1 fixed: NetworkMonitor caches the status from path updates; before the first update it is unknown
+  and isConnected = true. Only `.unsatisfied` counts as offline (`.requiresConnection` = connected).
+  Tests use internal `NetworkMonitor(startMonitoring: false)` + `update(_:)`.
 - Doc comments describe current behaviour incl. the open bugs below. Update docs in the same commit as a fix.
 - Known gaps vs Architecture above (not yet built, need API approval):
   - `Net` shared shortcut does not exist.
@@ -48,8 +51,6 @@ Goal: reusable across apps from e-commerce to banking. Security must be configur
 Critical
 - None open (C1, C3 fixed).
 Important
-- NetworkMonitor reports offline right after start (NWPathMonitor starts `unsatisfied`), so fail-fast
-  can reject the first request. Not testable until the monitor can be injected.
 - Relative paths with `?` or `%` get percent-encoded (`items?page=2` -> `items%3Fpage=2`).
 - `call` sends Optional values as `Optional(2)` in query strings; arrays/dicts stringified.
 - `ExponentialBackoffRetry.maxAttempts` counts retries (3 -> up to 4 requests); delay > 60 s stops retrying.
