@@ -197,6 +197,34 @@ final class RetryAndCancellationTests: XCTestCase {
         XCTAssertEqual(calls.count, 1)
     }
 
+    // MARK: - Error consistency
+
+    func test_interceptorError_isWrappedAsUnknown() async {
+        struct Boom: Error {}
+        struct Failing: RequestInterceptor {
+            func adapt(_ request: URLRequest) async throws -> URLRequest { throw Boom() }
+        }
+
+        let result = await send(makeMockClient(interceptors: [Failing()]))
+
+        guard case .failure(NetworkError.unknown(let underlying)) = result else { return XCTFail("got \(result)") }
+        XCTAssertTrue(underlying is Boom)
+    }
+
+    func test_request_encodingFailure_throwsNetworkError() async {
+        struct Unencodable: Encodable {
+            func encode(to encoder: Encoder) throws { throw EncodingError.invalidValue(0, .init(codingPath: [], debugDescription: "no")) }
+        }
+        do {
+            let _: TestItem = try await makeMockClient().request("x", method: .post, body: Unencodable())
+            XCTFail("Should have thrown")
+        } catch NetworkError.unknown(let underlying) {
+            XCTAssertTrue(underlying is EncodingError)
+        } catch {
+            XCTFail("Wrong error: \(error)")
+        }
+    }
+
     // MARK: - URLError mapping
 
     func test_notConnected_mapsToNoConnection() async {

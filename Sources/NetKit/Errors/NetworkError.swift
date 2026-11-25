@@ -27,6 +27,28 @@ public enum NetworkError: Error, Sendable {
     case unknown(Error)
 }
 
+extension NetworkError {
+
+    /// Converts any error into a NetworkError so every public API throws one error type.
+    static func wrap(_ error: Error) -> NetworkError {
+        switch error {
+        case let error as NetworkError:
+            return error
+        case is CancellationError:
+            return .cancelled
+        case let error as URLError:
+            switch error.code {
+            case .notConnectedToInternet, .networkConnectionLost: return .noConnection
+            case .timedOut: return .timeout
+            case .cancelled: return .cancelled
+            default: return .unknown(error)
+            }
+        default:
+            return .unknown(error)
+        }
+    }
+}
+
 public extension NetworkError {
 
     /// HTTP status code (httpError / unauthorized ku mattum)

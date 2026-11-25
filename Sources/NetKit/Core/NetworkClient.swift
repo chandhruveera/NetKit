@@ -35,7 +35,11 @@ public extension NetworkClient {
         var bodyData: Data?
 
         if let body {
-            bodyData = try JSONEncoder().encode(body)
+            do {
+                bodyData = try JSONEncoder().encode(body)
+            } catch {
+                throw NetworkError.wrap(error)
+            }
             if allHeaders["Content-Type"] == nil {
                 allHeaders["Content-Type"] = "application/json"
             }
@@ -71,10 +75,8 @@ public extension NetworkClient {
                     headers: headers, body: body, as: type
                 )
                 await MainActor.run { onSuccess(value) }
-            } catch let error as NetworkError {
-                await MainActor.run { onFailure(error) }
             } catch {
-                await MainActor.run { onFailure(.unknown(error)) }
+                await MainActor.run { onFailure(.wrap(error)) }
             }
         }
     }

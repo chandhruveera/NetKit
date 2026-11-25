@@ -38,7 +38,11 @@ public extension NetworkClient {
                 guard JSONSerialization.isValidJSONObject(parameter) else {
                     throw NetworkError.unknown(CallError.invalidJSONParameter)
                 }
-                body = try JSONSerialization.data(withJSONObject: parameter, options: [.sortedKeys])
+                do {
+                    body = try JSONSerialization.data(withJSONObject: parameter, options: [.sortedKeys])
+                } catch {
+                    throw NetworkError.wrap(error)
+                }
                 if allHeaders["Content-Type"] == nil {
                     allHeaders["Content-Type"] = "application/json"
                 }

@@ -107,8 +107,8 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
                     throw NetworkError.cancelled
                 }
 
-            } catch is CancellationError {
-                throw NetworkError.cancelled
+            } catch {
+                throw NetworkError.wrap(error)   // interceptor errors, CancellationError
             }
         }
     }
@@ -140,22 +140,14 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
         do {
             (data, response) = try await session.data(for: request)
 
-        } catch let error as URLError {
+        } catch {
             report(endpoint, status: nil, bytes: 0, since: startTime)
 
             // Layer 4: pinning fail aana
-            if let host = request.url?.host, securityDelegate.takePinFailure(host: host) {
+            if error is URLError, let host = request.url?.host, securityDelegate.takePinFailure(host: host) {
                 throw NetworkError.security(.pinningFailed(host))
             }
-            throw Self.map(error)
-
-        } catch is CancellationError {
-            report(endpoint, status: nil, bytes: 0, since: startTime)
-            throw NetworkError.cancelled
-
-        } catch {
-            report(endpoint, status: nil, bytes: 0, since: startTime)
-            throw NetworkError.unknown(error)
+            throw NetworkError.wrap(error)
         }
 
         // 5. Response validation
@@ -244,16 +236,5 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
             duration: ProcessInfo.processInfo.systemUptime - startTime,
             responseBytes: bytes
         ))
-    }
-
-    // MARK: - Error mapping
-
-    private static func map(_ error: URLError) -> NetworkError {
-        switch error.code {
-        case .notConnectedToInternet, .networkConnectionLost: return .noConnection
-        case .timedOut: return .timeout
-        case .cancelled: return .cancelled
-        default: return .unknown(error)
-        }
     }
 }
